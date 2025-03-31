@@ -1,7 +1,7 @@
 WITH WaitStats AS (
     SELECT
         req.session_id,
-        STRING_AGG(wait_stats.wait_type + ' (' + CAST(wait_stats.wait_time_ms AS VARCHAR) + ')', ', ') 
+        STRING_AGG(CAST(wait_stats.wait_type + ' (' + CAST(wait_stats.wait_time_ms AS VARCHAR) + ')' AS VARCHAR(MAX)), ', ') 
             WITHIN GROUP (ORDER BY wait_stats.wait_time_ms DESC) AS [wait_stat (ms)]
     FROM
         sys.dm_exec_requests AS req
@@ -12,7 +12,7 @@ WITH WaitStats AS (
 )
 SELECT
     @@servername as [SQL Server Instance],
-	DB_NAME() as [Database],
+	DB_NAME(req.database_id) as [Database],
 	ses.session_id,
 	req.request_id, --unique in the context of the session
     req.user_id,	--user id who submitted the request
@@ -65,7 +65,7 @@ SELECT
 				WHEN -2 THEN 'The blocking resource is owned by an orphaned distributed transaction'
 				WHEN -3 THEN 'The blocking resource is owned by a deferred recovery transaction'
 				WHEN -4 THEN 'session_id of the blocking latch owner couldn''t be determined at this time because of internal latch state transitions'
-				WHEN -5 THEN 'ession_id of the blocking latch owner couldn''t be determined because it isn''t tracked for this latch type (for example, for an SH latch)'
+				WHEN -5 THEN 'session_id of the blocking latch owner couldn''t be determined because it isn''t tracked for this latch type (for example, for an SH latch)'
 				ELSE req.blocking_session_id
 			END), 'No blocking') AS blocking_info,
     req.wait_type,
