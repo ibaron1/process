@@ -35,12 +35,12 @@ SELECT
     req.command,
     t.text AS executed_sql_text,
     qp.query_plan,
-    CASE
-        WHEN req.statement_start_offset = 0 AND req.statement_end_offset = 0 THEN 'Ad-Hoc'
-        ELSE 'Compiled'
+	CASE
+        WHEN cp.cacheobjtype = 'Adhoc' THEN 'Ad-Hoc'
+		ELSE 'Compiled'
     END AS statement_type,
     obj.name AS object_name,
-    isnull(obj.type_desc, iif(not(req.statement_start_offset = 0 AND req.statement_end_offset = 0),'Parameterised query',null)) AS object_type,
+    obj.type_desc AS object_type,
     cast(space.internal_objects_alloc_page_count/128.0 as dec(24,2)) as tempdb_alloc_space_MB,
 	cast(space.internal_objects_dealloc_page_count/128.0 as dec(24,2)) as tempdb_dealloc_space_MB,
 	cast((space.internal_objects_alloc_page_count - space.internal_objects_dealloc_page_count)/128.0 as dec(24,2)) as used_tempdb_space
@@ -49,6 +49,8 @@ FROM
     sys.dm_exec_sessions AS ses
 JOIN
     sys.dm_exec_requests AS req ON ses.session_id = req.session_id
+OUTER APPLY
+	sys.dm_exec_cached_plans cp
 OUTER APPLY
     sys.dm_exec_sql_text(req.sql_handle) AS t
 OUTER APPLY
