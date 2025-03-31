@@ -1,0 +1,21 @@
+added 
+sql server instance name 
+database name
+connection_id 		--id of the connection on which the request arrived
+user_id 		-- id of the user who submitted the request. / instead of login 
+parallel_worker_count
+request_id 		-- unique in session_id
+request start_time
+is_parameterized_query 	- snippet to identify it
+changed getting waits to window function, less resource stress, was added as cte
+nest_level 		--Current nesting level of code that is executing on the request
+lock_timeout
+deadlock_priority
+granted_query_memory to query in MB
+row_count 		--number of rows that have been returned to the client by this request
+enhanced blocking_info -- made it more clear for not caused by identifiable sesion_id
+transaction_isolation_level -- code to description
+
+
+
+
