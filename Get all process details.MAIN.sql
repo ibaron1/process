@@ -58,4 +58,3 @@ LEFT JOIN
 WHERE
     ses.session_id > 50  -- Exclude system sessions
     AND req.status = 'running';  -- Filter only running requests
-
