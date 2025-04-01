@@ -13,7 +13,16 @@ SELECT
     req.nest_level, --current nesting level of code that is executing on the request
     CAST(req.granted_query_memory/128.0 AS DEC(34,2)) as granted_query_memory_mb, --number of pages allocated to the execution of a query on the request
     req.row_count, --number of rows that have been returned to the client by this request
-    t.text AS executed_sql_text,
+    req.parallel_worker_count,
+    CAST(space.internal_objects_alloc_page_count / 128.0 AS DECIMAL(24, 2)) AS tempdb_alloc_space_MB,
+    CAST(space.internal_objects_dealloc_page_count / 128.0 AS DECIMAL(24, 2)) AS tempdb_dealloc_space_MB,
+    CAST((space.internal_objects_alloc_page_count - space.internal_objects_dealloc_page_count) / 128.0 AS DECIMAL(24, 2)) AS used_tempdb_space,
+    req.cpu_time AS cpu_time_ms,
+    req.total_elapsed_time AS elapsed_time_ms,
+    req.logical_reads, -- Logical reads
+    req.reads,  -- Physical reads
+    req.writes, -- Physical writes
+	t.text AS executed_sql_text,
     qp.query_plan,
     IIF(cp.cacheobjtype = 'Adhoc', 'Ad-Hoc', 'Compiled') AS statement_type,
     CASE WHEN 
@@ -25,15 +34,7 @@ SELECT
     END AS is_parameterized_query,
     obj.name AS object_name,
     obj.type_desc AS object_type,
-    req.parallel_worker_count,
-    CAST(space.internal_objects_alloc_page_count / 128.0 AS DECIMAL(24, 2)) AS tempdb_alloc_space_MB,
-    CAST(space.internal_objects_dealloc_page_count / 128.0 AS DECIMAL(24, 2)) AS tempdb_dealloc_space_MB,
-    CAST((space.internal_objects_alloc_page_count - space.internal_objects_dealloc_page_count) / 128.0 AS DECIMAL(24, 2)) AS used_tempdb_space,
-    req.cpu_time AS cpu_time_ms,
-    req.total_elapsed_time AS elapsed_time_ms,
-    req.logical_reads, -- Logical reads
-    req.reads,  -- Physical reads
-    req.writes, -- Physical writes
+
     req.percent_complete,
     req.estimated_completion_time,
     -- Wait statistics (comma-separated list with wait time)
@@ -92,4 +93,4 @@ LEFT JOIN
     sys.dm_db_session_space_usage AS space ON ses.session_id = space.session_id
 WHERE
     ses.session_id > 50 -- Exclude system sessions
-    AND req.status = 'running'; -- Filter only running requests
+
