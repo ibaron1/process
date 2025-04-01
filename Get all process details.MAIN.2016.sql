@@ -9,6 +9,30 @@ SELECT
     ses.host_name,
     req.status AS request_status,
     req.start_time,
+	object_name(t.objectid, t.dbid) AS object_name,
+	t.number AS proc_number, 
+     CASE 
+        WHEN OBJECTPROPERTY(t.objectid, 'IsTable') = 1 THEN 'Table'
+		WHEN OBJECTPROPERTY(t.objectid, 'IsUserTable') = 1 THEN 'User Table'
+        WHEN OBJECTPROPERTY(t.objectid, 'IsView') = 1 THEN 'View'
+        WHEN OBJECTPROPERTY(t.objectid, 'IsProcedure') = 1 THEN 'Stored Procedure'
+		WHEN OBJECTPROPERTY(t.objectid, 'IsTrigger') = 1 THEN 'Trigger'
+		WHEN OBJECTPROPERTY(t.objectid, 'IsReplProc') = 1 THEN 'Repl Proc'
+		WHEN OBJECTPROPERTY(t.objectid, 'IsTableFunction') = 1 THEN 'Table Function'
+		WHEN OBJECTPROPERTY(t.objectid, 'IsScalarFunction') = 1 THEN 'Scalar Function'
+		WHEN OBJECTPROPERTY(t.objectid, 'IsInlineFunction') = 1 THEN 'Inline Function'
+		WHEN OBJECTPROPERTY(t.objectid, 'IsExtendedProc') = 1 THEN 'Extended Proc'
+		WHEN OBJECTPROPERTY(t.objectid, 'IsEncrypted') = 1 THEN 'Encrypted'
+        ELSE NULL
+     END AS object_type,
+	IIF(cp.cacheobjtype = 'Adhoc', 'Ad-Hoc', 'Compiled') AS statement_type,
+    CASE WHEN 
+            obj.name IS NULL
+            AND t.text LIKE '(@%'  -- Look for any parameter (e.g., @ObjectType, @ParameterName) in the SQL text
+            AND cp.cacheobjtype = 'Compiled Plan'  -- Ensure that we're looking at compiled query plans
+     THEN
+        'Yes'
+    END AS is_parameterized_query,
     req.command,
     req.nest_level, --current nesting level of code that is executing on the request
     CAST(req.granted_query_memory/128.0 AS DEC(34,2)) as granted_query_memory_mb, --number of pages allocated to the execution of a query on the request
@@ -24,17 +48,6 @@ SELECT
     req.writes, -- Physical writes
 	t.text AS executed_sql_text,
     qp.query_plan,
-    IIF(cp.cacheobjtype = 'Adhoc', 'Ad-Hoc', 'Compiled') AS statement_type,
-    CASE WHEN 
-            obj.name IS NULL
-            AND t.text LIKE '(@%'  -- Look for any parameter (e.g., @ObjectType, @ParameterName) in the SQL text
-            AND cp.cacheobjtype = 'Compiled Plan'  -- Ensure that we're looking at compiled query plans
-     THEN
-        'Yes'
-    END AS is_parameterized_query,
-    obj.name AS object_name,
-    obj.type_desc AS object_type,
-
     req.percent_complete,
     req.estimated_completion_time,
     -- Wait statistics (comma-separated list with wait time)
