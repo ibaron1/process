@@ -1,0 +1,48 @@
+Connecting to a read-only secondary in a SQL Server Always On Availability Group is a common setup for offloading read workloads from the primary replica. 
+Here's a step-by-step guide to help you connect properly:
+
+1. Configure the Availability Group for Read-Only Routing
+On the server side, make sure:
+•	The secondary replicas are configured to allow read-only connections.
+•	The read-only routing URL and routing list are set up correctly.
+•	The listener is properly configured.
+For example, configure like this (on the primary replica):
+-- Set up read-only routing URL for secondary replica
+ALTER AVAILABILITY GROUP [AGName]
+MODIFY REPLICA ON 'SecondaryReplicaName'
+WITH (SECONDARY_ROLE (READ_ONLY_ROUTING_URL = 'TCP://SecondaryHost:1433'));
+
+-- Set up the routing list
+ALTER AVAILABILITY GROUP [AGName]
+MODIFY REPLICA ON 'PrimaryReplicaName'
+WITH (PRIMARY_ROLE (READ_ONLY_ROUTING_LIST = ('SecondaryReplicaName')));
+
+ 2. Make Sure Read-Only Routing Is Enabled on Secondary
+The replica's availability mode should allow read access when it's secondary:
+-- Check or set secondary replica settings
+ALTER AVAILABILITY GROUP [AGName]
+MODIFY REPLICA ON 'SecondaryReplicaName'
+WITH (
+    SECONDARY_ROLE (ALLOW_CONNECTIONS = READ_ONLY)
+);
+
+
+✅ 3. Connect via the Listener for Read-Only Routing
+When connecting, use the Availability Group listener name and add these parameters:
+•	ApplicationIntent=ReadOnly
+•	Optionally: MultiSubnetFailover=True if using multiple subnets
+🧪 Example Connection Strings:
+SQLCMD:
+sqlcmd -S ListenerName -d DatabaseName -E -K ReadOnly
+
+ADO.NET:
+Server=ListenerName;Database=DBName;Integrated Security=True;ApplicationIntent=ReadOnly;
+
+JDBC:
+jdbc:sqlserver://ListenerName:1433;databaseName=DBName;applicationIntent=ReadOnly;
+
+Important Notes:
+•	If you connect directly to a secondary, it must allow read-only access and the connection must not require redirection.
+•	Read-only routing only works when connecting to the listener, not when connecting directly to the secondary server unless explicitly allowed.
+
+
