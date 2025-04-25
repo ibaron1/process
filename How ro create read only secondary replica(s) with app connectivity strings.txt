@@ -1,0 +1,82 @@
+
+
+To connect to an Always On Availability Group via ODBC, you must use a listener name, which provides a single DNS name for clients to connect, regardless of which replica is primary.
+
+Here’s a sample ODBC connection string for Always On:
+
+Driver={ODBC Driver 18 for SQL Server};Server=AGListenerName,1433;Database=YourDatabaseName;UID=YourUsername;PWD=YourPassword;Encrypt=yes;TrustServerCertificate=no;ApplicationIntent=ReadWrite;MultiSubnetFailover=Yes;
+Key Parameters:
+Server=AGListenerName,1433 – the listener DNS name and port (1433 by default).
+
+ApplicationIntent=ReadWrite – or ReadOnly if you’re targeting a readable secondary.
+
+MultiSubnetFailover=Yes – important if your AG spans multiple subnets (improves failover time).
+
+Encrypt=yes;TrustServerCertificate=no – recommended for secure connections (adjust based on cert setup).
+
+
+For a read-only connection to a SQL Server Always On Availability Group using ODBC, use this connection string:
+
+Driver={ODBC Driver 18 for SQL Server};Server=AGListenerName,1433;Database=YourDatabaseName;UID=YourUsername;PWD=YourPassword;Encrypt=yes;TrustServerCertificate=no;ApplicationIntent=ReadOnly;MultiSubnetFailover=Yes;
+
+or ReadWrite for read and write
+
+AGListenerName with your availability group listener DNS name
+
+YourDatabaseName, YourUsername, YourPassword with your actual values
+
+Do you want the string with Windows authentication instead of SQL login?
+
+You said:
+how to configure the availability group for read-only routing
+ChatGPT said:
+To configure read-only routing in a SQL Server Always On Availability Group, you need to perform a few key steps using T-SQL or SQL Server Management Studio (SSMS). Here's a clear step-by-step overview:
+
+✅ Prerequisites
+Availability Group is already created.
+
+You have one or more readable secondary replicas.
+
+You’re using a listener for client connections.
+
+The readable secondary replicas have Read-Only Routing URL defined.
+
+🛠️ Steps to Configure Read-Only Routing (T-SQL)
+1. Enable readable secondary
+On each secondary replica:
+
+ALTER AVAILABILITY GROUP [YourAGName]
+MODIFY REPLICA ON 'SecondaryReplicaName'
+WITH (SECONDARY_ROLE (ALLOW_CONNECTIONS = READ_ONLY));
+2. Set Read-Only Routing URL
+Define the URL that clients will use to connect to the readable secondary.
+
+ALTER AVAILABILITY GROUP [YourAGName]
+MODIFY REPLICA ON 'SecondaryReplicaName'
+WITH (SECONDARY_ROLE (READ_ONLY_ROUTING_URL = 'TCP://secondary.domain.com:1433'));
+3. Configure Read-Only Routing List
+On the primary replica, define where to route read-only connections when this node is primary:
+
+ALTER AVAILABILITY GROUP [YourAGName]
+MODIFY REPLICA ON 'PrimaryReplicaName'
+WITH (PRIMARY_ROLE (READ_ONLY_ROUTING_LIST = ('SecondaryReplicaName')));
+🧠 You can also list multiple secondaries in order of preference:
+WITH (PRIMARY_ROLE (READ_ONLY_ROUTING_LIST = ('Secondary1', 'Secondary2')));
+🎯 Example Summary
+-- On Secondary
+ALTER AVAILABILITY GROUP [AG1]
+MODIFY REPLICA ON 'SQLNode2'
+WITH (SECONDARY_ROLE (ALLOW_CONNECTIONS = READ_ONLY, READ_ONLY_ROUTING_URL = 'TCP://sqlnode2.contoso.com:1433'));
+
+-- On Primary
+ALTER AVAILABILITY GROUP [AG1]
+MODIFY REPLICA ON 'SQLNode1'
+WITH (PRIMARY_ROLE (READ_ONLY_ROUTING_LIST = ('SQLNode2')));
+✅ Confirm Configuration
+Check routing with this query:
+
+SELECT * FROM sys.availability_read_only_routing_lists;
+
+Would you like a script that generates this setup for your specific nodes?
+
+

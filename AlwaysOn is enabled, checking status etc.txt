@@ -1,0 +1,38 @@
+Use ISHADRENABLED property to check the status of "Always On" availability of groups. 
+You can use Windows PowerShell to invoke SQL command on a reachable server within the network using Invoke-Sqlcmd cmdlet as the following, Open Windows PowerShell as Administrator. Type the Invoke-Sqlcmd with the below parameters.
+
+
+To be enabled for Always On availability groups, an instance of SQL Server must reside on a WSFC node, and the WSFC and node must be online. Furthermore, each availability replica of a given availability group must reside on a different node of the same WSFC.
+
+Windows Server Failover Clustering (WSFC) is a feature of the Microsoft Windows Server operating system that allows multiple computers to host a service. If one computer experiences a fault, the remaining computers will automatically take over hosting the service. WSFC is included with Windows Server 2022, Windows Server 2019, Windows Server 2016, and Azure Stack HCI.
+
+
+https://learn.microsoft.com/en-us/sql/relational-databases/database-mail/create-a-database-mail-profile?view=sql-server-ver16
+The following example creates a Database Mail account, creates a Database Mail private profile, then adds the account to the profile and grants access to the profile to the DBMailUsers database role in the msdb database.
+
+-- Create a Database Mail account  
+EXECUTE msdb.dbo.sysmail_add_account_sp  
+    @account_name = 'AdventureWorks Administrator',  
+    @description = 'Mail account for administrative e-mail.',  
+    @email_address = 'dba@Adventure-Works.com',  
+    @replyto_address = 'danw@Adventure-Works.com',  
+    @display_name = 'AdventureWorks Automated Mailer',  
+    @mailserver_name = 'smtp.Adventure-Works.com' ;  
+  
+-- Create a Database Mail profile  
+EXECUTE msdb.dbo.sysmail_add_profile_sp  
+    @profile_name = 'AdventureWorks Administrator Profile',  
+    @description = 'Profile used for administrative mail.' ;  
+  
+-- Add the account to the profile  
+EXECUTE msdb.dbo.sysmail_add_profileaccount_sp  
+    @profile_name = 'AdventureWorks Administrator Profile',  
+    @account_name = 'AdventureWorks Administrator',  
+    @sequence_number =1 ;  
+  
+-- Grant access to the profile to the DBMailUsers role  
+EXECUTE msdb.dbo.sysmail_add_principalprofile_sp  
+    @profile_name = 'AdventureWorks Administrator Profile',  
+    @principal_name = 'ApplicationUser',  
+    @is_default = 1 ;
+

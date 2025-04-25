@@ -1,0 +1,58 @@
+Here's a customizable T-SQL script that configures read-only routing for an Always On Availability Group with two nodes — a primary and a readable secondary.
+
+Let’s assume the following placeholders:
+
+🟦 Availability Group Name: AG_SalesApp
+
+🟢 Primary Replica: SQLNode1
+
+🔵 Secondary Replica: SQLNode2
+
+🌐 Listener DNS Name: salesapp-listener.contoso.com
+
+📡 Port: 1433
+
+You can copy this and update the placeholders to match your setup:
+
+
+-- Step 1: Allow Read-Only connections on secondary
+ALTER AVAILABILITY GROUP [AG_SalesApp]
+MODIFY REPLICA ON 'SQLNode2'
+WITH (
+    SECONDARY_ROLE (
+        ALLOW_CONNECTIONS = READ_ONLY,
+        READ_ONLY_ROUTING_URL = 'TCP://sqlnode2.contoso.com:1433'
+    )
+);
+
+-- Step 2: Define Read-Only Routing List on the PRIMARY replica
+ALTER AVAILABILITY GROUP [AG_SalesApp]
+MODIFY REPLICA ON 'SQLNode1'
+WITH (
+    PRIMARY_ROLE (
+        READ_ONLY_ROUTING_LIST = ('SQLNode2')
+    )
+);
+
+-- Step 3 (Optional): Set up routing list for when SQLNode2 is primary
+ALTER AVAILABILITY GROUP [AG_SalesApp]
+MODIFY REPLICA ON 'SQLNode2'
+WITH (
+    PRIMARY_ROLE (
+        READ_ONLY_ROUTING_LIST = ('SQLNode1')
+    )
+);
+Then you can verify the configuration using:
+
+SELECT 
+    ag.name AS AG_Name,
+    ar.replica_server_name,
+    ar.read_only_routing_url,
+    ar.allow_connections_desc,
+    arrl.routing_priority,
+    arrl.read_only_replica_server_name
+FROM sys.availability_replicas ar
+LEFT JOIN sys.availability_read_only_routing_lists arrl 
+    ON ar.replica_id = arrl.replica_id
+JOIN sys.availability_groups ag 
+    ON ag.group_id = ar.group_id;
