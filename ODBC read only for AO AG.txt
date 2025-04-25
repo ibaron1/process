@@ -1,0 +1,4 @@
+Driver={ODBC Driver 18 for SQL Server};Server=AGListenerName,1433;Database=YourDatabaseName;UID=YourUsername;PWD=YourPassword;Encrypt=yes;TrustServerCertificate=no;ApplicationIntent=ReadWrite;MultiSubnetFailover=Yes;
+
+Driver={ODBC Driver 18 for SQL Server};Server=AGListenerName,1433;Database=YourDatabaseName;UID=YourUsername;PWD=YourPassword;Encrypt=yes;TrustServerCertificate=no;ApplicationIntent=ReadOnly;MultiSubnetFailover=Yes;
+
