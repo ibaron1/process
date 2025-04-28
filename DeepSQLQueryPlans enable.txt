@@ -1,3 +1,0 @@
-bash 
-
-pip install pyodbc lxml smtplib email

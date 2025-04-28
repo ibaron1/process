@@ -1,54 +1,94 @@
--- Blocking Tree in SQL Server
+-- Only blocking and blocked sessions
+WITH BlockingInfo AS (
+    SELECT
+        r.session_id,
+        r.blocking_session_id,
+        r.wait_type,
+        r.wait_time,
+        r.wait_resource,
+        DB_NAME(r.database_id) AS database_name,
+        s.status,
+        s.login_name,
+        s.host_name,
+        s.program_name,
+        r.start_time,
+        r.command,
+        t.text AS sql_text
+    FROM
+        sys.dm_exec_requests r
+    INNER JOIN
+        sys.dm_exec_sessions s ON r.session_id = s.session_id
+    OUTER APPLY
+        sys.dm_exec_sql_text(r.sql_handle) t
+    WHERE
+        r.blocking_session_id <> 0 -- only sessions that are blocked
+        OR EXISTS (
+            -- or sessions that are blocking others
+            SELECT 1
+            FROM sys.dm_exec_requests r2
+            WHERE r2.blocking_session_id = r.session_id
+        )
+)
 SELECT
-    session_id AS [SPID],
-    blocking_session_id AS [Blocked By],
-    wait_type,
-    wait_time,
-    wait_resource,
-    DB_NAME(database_id) AS [Database],
-    status,
-    login_name,
-    host_name,
-    program_name,
-    last_request_start_time,
-    last_request_end_time,
-    text AS [SQL Text]
+    *
 FROM
-    sys.dm_exec_requests r
-OUTER APPLY
-    sys.dm_exec_sql_text(r.sql_handle) t
-WHERE
-    session_id > 50 -- system sessions are usually below 50
+    BlockingInfo
 ORDER BY
     blocking_session_id, session_id;
 
--- Blocking Tree (more structured, tree-like view)
+	--============================================
+
+-- Blocking Tree
 WITH BlockingTree AS (
     SELECT
-        session_id,
-        blocking_session_id,
+        r.session_id,
+        r.blocking_session_id,
+        s.login_name,
+        s.host_name,
+        s.program_name,
+        r.command,
+        t.text AS sql_text,
         0 AS Level
     FROM
-        sys.dm_exec_requests
+        sys.dm_exec_requests r
+    INNER JOIN
+        sys.dm_exec_sessions s ON r.session_id = s.session_id
+    OUTER APPLY
+        sys.dm_exec_sql_text(r.sql_handle) t
     WHERE
-        blocking_session_id = 0
-
+        r.blocking_session_id = 0
+        AND r.session_id IN (SELECT DISTINCT blocking_session_id FROM sys.dm_exec_requests WHERE blocking_session_id != 0)
+    
     UNION ALL
 
     SELECT
         r.session_id,
         r.blocking_session_id,
+        s.login_name,
+        s.host_name,
+        s.program_name,
+        r.command,
+        t.text,
         bt.Level + 1
     FROM
         sys.dm_exec_requests r
-        INNER JOIN BlockingTree bt ON r.blocking_session_id = bt.session_id
+    INNER JOIN
+        sys.dm_exec_sessions s ON r.session_id = s.session_id
+    OUTER APPLY
+        sys.dm_exec_sql_text(r.sql_handle) t
+    INNER JOIN BlockingTree bt ON r.blocking_session_id = bt.session_id
 )
 SELECT
-    REPLICATE('    ', Level) + CAST(session_id AS NVARCHAR(10)) AS BlockingHierarchy,
+    REPLICATE('    ', Level) + CAST(session_id AS NVARCHAR(10)) AS [Session Tree],
     session_id,
     blocking_session_id,
-    Level
+    login_name,
+    host_name,
+    program_name,
+    command,
+    sql_text
 FROM
     BlockingTree
 ORDER BY
     Level, session_id;
+
