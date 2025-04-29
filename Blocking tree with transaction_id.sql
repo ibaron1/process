@@ -69,12 +69,10 @@ SELECT
     bt.wait_type,
     bt.wait_time,
     bt.wait_resource,
-    -- Show SQL text if available, otherwise indicate it's not running any SQL
-    CASE 
-        WHEN st.text IS NOT NULL THEN LEFT(st.text, 200) 
-        ELSE 'No active SQL' 
-    END AS blocking_sql_text
+    LEFT(st.text, 200) AS blocking_sql_text,
+    tr.transaction_id -- Show the transaction ID (if available) for blocking sessions
 FROM Tree t
 JOIN BlockingTree bt ON t.session_id = bt.session_id
 OUTER APPLY sys.dm_exec_sql_text(bt.sql_handle) AS st
+LEFT JOIN sys.dm_tran_session_transactions tr ON bt.session_id = tr.session_id -- Correct join here
 ORDER BY t.Level, t.BlockChain;

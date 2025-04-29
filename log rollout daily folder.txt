@@ -1,0 +1,43 @@
+Correct way (safe and simple):
+If you want a fixed folder like C:\Blocking, then don't touch $MyInvocation at all.
+Instead, just directly assign $LogRoot like this:
+
+powershell
+
+$LogRoot = "C:\BlockingLogs"
+No Join-Path, no $MyInvocation, nothing else.
+
+If you really want to auto-detect the script’s location (only when running from a .ps1 file, not inline console):
+
+Use this:
+
+powershell
+
+if ($MyInvocation.MyCommand.Path) {
+    $LogRoot = Join-Path -Path (Split-Path -Parent $MyInvocation.MyCommand.Path) -ChildPath "BlockingLogs"
+} else {
+    $LogRoot = "C:\BlockingLogs"
+}
+🧠 What it does:
+If $MyInvocation.MyCommand.Path exists (running from script file) → use relative folder.
+
+If not (running in console) → fallback to C:\BlockingLogs.
+
+⚡ In short:
+Pick one depending on what you want:
+
+
+Goal	Code
+Always save to C:\BlockingLogs	$LogRoot = "C:\BlockingLogs"
+Auto-detect script folder	Use if ($MyInvocation.MyCommand.Path) { ... } block
+
+🚀 Recommendation for now:
+Since you're still building/testing, just use:
+
+powershell
+Copy
+Edit
+$LogRoot = "C:\BlockingLogs"
+Simple and won't ever break.
+Later, when you make it more portable, you can re-add dynamic folder logic.
+
