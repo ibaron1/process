@@ -1,5 +1,0 @@
-.\BlockingTree.ps1 "yourhost,port"
-
-
-for example
-.\BlockingTree.ps1 "DESKTOP-APNO79K,64919"
