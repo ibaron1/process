@@ -1,0 +1,577 @@
+
+how to setup AD login with Kerberos authentication from linux server to windows sql server instance
+
+To set up Active Directory (AD) login with Kerberos authentication from a Linux server to a Windows SQL Server instance, you need to properly configure Kerberos, SQL Server, and ODBC on the Linux machine. Here's a step-by-step guide:
+
+✅ Overview
+You’re enabling a Linux client (using Kerberos auth) to connect to SQL Server on Windows using an AD account.
+
+🔧 1. Prerequisites
+SQL Server running on Windows, joined to Active Directory.
+
+Linux server (e.g., Ubuntu, CentOS).
+
+An Active Directory account (e.g., domain\sqluser).
+
+Access to create SPNs and manage keytabs if needed.
+
+🧩 2. Set SPN for SQL Server (on the Windows side)
+Run on a domain controller (or with an account that can set SPNs):
+
+setspn -A MSSQLSvc/sqlserver.domain.com:1433 domain\sqlserviceaccount
+Replace sqlserver.domain.com with the FQDN of the SQL Server host.
+
+Replace domain\sqlserviceaccount with the service account running SQL Server.
+
+📌 Ensure the SQL Server instance is listening on port 1433 or adjust as needed.
+
+🔐 3. Install Kerberos & ODBC dependencies on Linux
+For Ubuntu/Debian:
+sudo apt update
+sudo apt install krb5-user msodbcsql18 unixodbc
+For RHEL/CentOS:
+sudo yum install krb5-workstation msodbcsql18 unixODBC
+🧾 4. Configure Kerberos (/etc/krb5.conf)
+Example config:
+
+[libdefaults]
+    default_realm = DOMAIN.COM
+    dns_lookup_realm = true
+    dns_lookup_kdc = true
+
+[realms]
+    DOMAIN.COM = {
+        kdc = your.ad.controller.domain.com
+        admin_server = your.ad.controller.domain.com
+    }
+
+[domain_realm]
+    .domain.com = DOMAIN.COM
+    domain.com = DOMAIN.COM
+🪪 5. Get a Kerberos Ticket
+Use your AD credentials:
+
+kinit youruser@DOMAIN.COM
+It will prompt for the password. Verify with:
+
+klist
+💻 6. Test Connection with sqlcmd or ODBC
+Install sqlcmd if needed (part of mssql-tools):
+
+sqlcmd -S sqlserver.domain.com -d YourDB -G
+-G enables Kerberos Integrated Authentication.
+
+Ensure your ODBC DSN (if using) is configured with Authentication=ActiveDirectoryIntegrated.
+
+⚙️ 7. SQL Server Configuration
+Ensure SQL Server is in Mixed Mode or Windows Authentication mode and the login exists:
+
+-- Run this on SQL Server
+CREATE LOGIN [DOMAIN\youruser] FROM WINDOWS;
+🧪 Troubleshooting
+Use klist to ensure a valid ticket exists.
+
+Use setspn -L youraccount to check SPNs.
+
+Check SQL Server logs for authentication failures.
+
+Would you like a shell script to automate the Linux setup steps?
+
+Messages beyond this point are only visible to you
+
+You said:
+yes
+ChatGPT said:
+Here’s a shell script that automates most of the Kerberos and ODBC setup on a Linux machine to connect to a Windows SQL Server using an Active Directory login and Kerberos authentication.
+
+🔧 This script is targeted for Ubuntu/Debian-based systems. Let me know if you need one for RHEL/CentOS.
+
+🚀 setup_sqlserver_kerberos.sh
+#!/bin/bash
+
+# CONFIGURE THESE VARIABLES
+AD_REALM="DOMAIN.COM"
+AD_USERNAME="youruser"
+SQL_SERVER_FQDN="sqlserver.domain.com"
+SQL_DB="YourDatabase"
+KDC_SERVER="ad.domain.com"
+
+echo "🔧 Installing dependencies..."
+sudo apt update && sudo apt install -y krb5-user msodbcsql18 unixodbc curl
+
+echo "🔐 Configuring /etc/krb5.conf..."
+sudo bash -c "cat > /etc/krb5.conf" <<EOF
+[libdefaults]
+    default_realm = $AD_REALM
+    dns_lookup_realm = true
+    dns_lookup_kdc = true
+    ticket_lifetime = 24h
+    forwardable = true
+
+[realms]
+    $AD_REALM = {
+        kdc = $KDC_SERVER
+        admin_server = $KDC_SERVER
+    }
+
+[domain_realm]
+    .$AD_REALM = $AD_REALM
+    .${AD_REALM,,} = $AD_REALM
+EOF
+
+echo "🎫 Requesting Kerberos ticket for $AD_USERNAME@$AD_REALM"
+echo "You will be prompted for the AD password..."
+kinit "${AD_USERNAME}@${AD_REALM}"
+
+echo "📋 Verifying Kerberos ticket..."
+klist
+
+echo "🧪 Testing connection to SQL Server with sqlcmd..."
+sqlcmd -S "$SQL_SERVER_FQDN" -d "$SQL_DB" -G -Q "SELECT SYSTEM_USER, ORIGINAL_LOGIN();"
+
+echo "✅ Setup complete."
+📝 Instructions
+Replace these variables in the script:
+
+AD_REALM → Your AD domain in uppercase (e.g. EXAMPLE.COM)
+
+AD_USERNAME → Your AD login username
+
+SQL_SERVER_FQDN → The full domain name of your SQL Server
+
+SQL_DB → The name of a database you can access
+
+KDC_SERVER → The hostname or IP of your AD Domain Controller
+
+Save the script:
+
+nano setup_sqlserver_kerberos.sh
+Make it executable and run:
+
+chmod +x setup_sqlserver_kerberos.sh
+./setup_sqlserver_kerberos.sh
+Would you like a version of this script for CentOS/RHEL systems?
+
+Here’s the CentOS/RHEL-compatible version of the setup script for Kerberos authentication to SQL Server via Active Directory.
+
+🚩 Compatible with RHEL 7/8/9 and CentOS 7. Assumes sudo/root privileges.
+
+🔧 setup_sqlserver_kerberos_rhel.sh
+bash
+Copy
+Edit
+#!/bin/bash
+
+# CONFIGURE THESE VARIABLES
+AD_REALM="DOMAIN.COM"
+AD_USERNAME="youruser"
+SQL_SERVER_FQDN="sqlserver.domain.com"
+SQL_DB="YourDatabase"
+KDC_SERVER="ad.domain.com"
+
+echo "🔧 Installing required packages..."
+sudo yum install -y krb5-workstation unixODBC curl
+
+# Optional: Install MS ODBC Driver 18
+if ! command -v sqlcmd &>/dev/null; then
+  echo "📦 Installing Microsoft ODBC Driver 18 and sqlcmd..."
+
+  # Add Microsoft repo
+  sudo rpm -Uvh https://packages.microsoft.com/config/rhel/8/packages-microsoft-prod.rpm
+
+  # Install the driver
+  sudo yum install -y msodbcsql18 mssql-tools18
+
+  # Add to PATH
+  echo 'export PATH="$PATH:/opt/mssql-tools18/bin"' >> ~/.bash_profile
+  source ~/.bash_profile
+fi
+
+echo "🔐 Configuring /etc/krb5.conf..."
+sudo bash -c "cat > /etc/krb5.conf" <<EOF
+[libdefaults]
+    default_realm = $AD_REALM
+    dns_lookup_realm = true
+    dns_lookup_kdc = true
+    ticket_lifetime = 24h
+    forwardable = true
+
+[realms]
+    $AD_REALM = {
+        kdc = $KDC_SERVER
+        admin_server = $KDC_SERVER
+    }
+
+[domain_realm]
+    .$AD_REALM = $AD_REALM
+    .${AD_REALM,,} = $AD_REALM
+EOF
+
+echo "🎫 Requesting Kerberos ticket for $AD_USERNAME@$AD_REALM"
+echo "You will be prompted for the AD password..."
+kinit "${AD_USERNAME}@${AD_REALM}"
+
+echo "📋 Verifying Kerberos ticket..."
+klist
+
+echo "🧪 Testing connection to SQL Server with sqlcmd..."
+sqlcmd -S "$SQL_SERVER_FQDN" -d "$SQL_DB" -G -Q "SELECT SYSTEM_USER, ORIGINAL_LOGIN();"
+
+echo "✅ Setup complete."
+🧪 Usage
+Customize the variables:
+
+AD_REALM: Your domain, e.g. EXAMPLE.COM
+
+AD_USERNAME: Your Active Directory username
+
+SQL_SERVER_FQDN: FQDN of the SQL Server
+
+SQL_DB: Target database name
+
+KDC_SERVER: Hostname of the domain controller
+
+Save and execute:
+
+bash
+Copy
+Edit
+nano setup_sqlserver_kerberos_rhel.sh
+chmod +x setup_sqlserver_kerberos_rhel.sh
+./setup_sqlserver_kerberos_rhel.sh
+
+a complete solution for automating:
+
+Kerberos configuration for multiple users.
+
+SQL Server DSN setup using ODBC.
+
+Optionally, creating a shared system-wide DSN (for apps like isql, Python pyodbc, etc.).
+
+This version supports RHEL/CentOS-based systems and includes reusable logic.
+
+🛠️ Script: configure_sql_kerberos_dsn.sh
+bash
+Copy
+Edit
+#!/bin/bash
+
+# Edit these to fit your environment
+AD_REALM="DOMAIN.COM"
+KDC_SERVER="ad.domain.com"
+SQL_SERVER_FQDN="sqlserver.domain.com"
+SQL_PORT="1433"
+DSN_NAME="MSSQL_KERBEROS"
+SQL_DB="YourDatabase"
+
+# Ensure required packages are installed
+echo "📦 Installing required packages..."
+sudo yum install -y krb5-workstation unixODBC
+
+# Install MS ODBC Driver 18 and tools (if not already)
+if ! command -v sqlcmd &>/dev/null; then
+  echo "⬇ Installing MS ODBC Driver 18..."
+  sudo rpm -Uvh https://packages.microsoft.com/config/rhel/8/packages-microsoft-prod.rpm
+  sudo yum install -y msodbcsql18 mssql-tools18
+  echo 'export PATH="$PATH:/opt/mssql-tools18/bin"' >> ~/.bash_profile
+  source ~/.bash_profile
+fi
+
+# Configure Kerberos (global)
+echo "🔐 Writing /etc/krb5.conf..."
+sudo bash -c "cat > /etc/krb5.conf" <<EOF
+[libdefaults]
+  default_realm = $AD_REALM
+  dns_lookup_realm = true
+  dns_lookup_kdc = true
+  ticket_lifetime = 24h
+  forwardable = true
+
+[realms]
+  $AD_REALM = {
+    kdc = $KDC_SERVER
+    admin_server = $KDC_SERVER
+  }
+
+[domain_realm]
+  .$AD_REALM = $AD_REALM
+  .${AD_REALM,,} = $AD_REALM
+EOF
+
+# Configure system-wide DSN in /etc/odbc.ini
+echo "🧾 Creating system-wide DSN: $DSN_NAME"
+sudo bash -c "cat > /etc/odbc.ini" <<EOF
+[$DSN_NAME]
+Driver=ODBC Driver 18 for SQL Server
+Server=$SQL_SERVER_FQDN,$SQL_PORT
+Database=$SQL_DB
+Authentication=ActiveDirectoryIntegrated
+TrustServerCertificate=yes
+Encrypt=yes
+EOF
+
+# Register the driver (if not already listed)
+if ! grep -q "ODBC Driver 18" /etc/odbcinst.ini; then
+  echo "🛠 Registering ODBC Driver 18 in /etc/odbcinst.ini"
+  sudo bash -c "cat >> /etc/odbcinst.ini" <<EOF
+[ODBC Driver 18 for SQL Server]
+Description=Microsoft ODBC Driver 18 for SQL Server
+Driver=/opt/microsoft/msodbcsql18/lib64/libmsodbcsql-18.X.so
+UsageCount=1
+EOF
+fi
+
+# List user instructions
+cat <<EOF
+
+✅ Setup Complete
+
+To connect using Kerberos:
+
+1. Log in as any user and run:
+   kinit youruser@${AD_REALM}
+
+2. Test using:
+   sqlcmd -S $SQL_SERVER_FQDN -d $SQL_DB -G
+
+3. Or use isql with DSN:
+   isql -v $DSN_NAME -k
+
+EOF
+🔧 To Use
+Save the script:
+nano configure_sql_kerberos_dsn.sh
+
+Make it executable:
+chmod +x configure_sql_kerberos_dsn.sh
+
+Run it:
+sudo ./configure_sql_kerberos_dsn.sh
+
+Then, as any user:
+
+Run kinit to get a Kerberos ticket.
+
+Use sqlcmd or isql with the configured DSN.
+
+here’s a sample Python script using pyodbc to connect to SQL Server via Kerberos using the system-wide DSN you configured earlier.
+
+✅ This example assumes:
+
+You ran the script above and created a DSN (e.g. MSSQL_KERBEROS).
+
+The user has run kinit and has a valid Kerberos ticket.
+
+Python 3 and pyodbc are installed.
+
+🐍 Sample: connect_sqlserver_kerberos.py
+python
+Copy
+Edit
+import pyodbc
+
+# Replace with your actual DSN name
+DSN_NAME = "MSSQL_KERBEROS"
+
+try:
+    print("🔗 Connecting to SQL Server using Kerberos and DSN...")
+
+    conn = pyodbc.connect(f"DSN={DSN_NAME};Authentication=ActiveDirectoryIntegrated", autocommit=True)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT SYSTEM_USER, ORIGINAL_LOGIN();")
+    row = cursor.fetchone()
+
+    print(f"✅ Connected as: {row[0]} (Original Login: {row[1]})")
+
+    cursor.close()
+    conn.close()
+
+except pyodbc.Error as e:
+    print("❌ Connection failed.")
+    print(e)
+🧪 How to Run
+Make sure you have a Kerberos ticket:
+
+bash
+Copy
+Edit
+kinit youruser@DOMAIN.COM
+Install pyodbc if not already:
+
+bash
+Copy
+Edit
+pip install pyodbc
+Save and run the script:
+
+bash
+Copy
+Edit
+python3 connect_sqlserver_kerberos.py
+
+an extended and more production-ready version of the Python pyodbc script. It includes:
+
+✅ Parameterized queries
+✅ Robust error logging
+✅ Optionally logs to a file
+✅ Query execution with input parameters
+
+🐍 Extended Script: connect_sqlserver_kerberos.py
+python
+Copy
+Edit
+import pyodbc
+import logging
+from datetime import datetime
+
+# ====== Configuration ======
+DSN_NAME = "MSSQL_KERBEROS"
+LOG_FILE = "sql_kerberos_query.log"
+QUERY = "SELECT SYSTEM_USER AS UserName, ORIGINAL_LOGIN() AS OriginalLogin;"
+PARAM_QUERY = "SELECT * FROM YourTable WHERE Column1 = ?;"
+PARAM_VALUE = "SomeValue"  # Replace with actual parameter if needed
+
+# ====== Set up logging ======
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+
+def connect_and_query():
+    try:
+        logging.info("Attempting to connect to SQL Server using DSN: %s", DSN_NAME)
+        print("🔗 Connecting to SQL Server using Kerberos and DSN...")
+
+        conn = pyodbc.connect(
+            f"DSN={DSN_NAME};Authentication=ActiveDirectoryIntegrated",
+            autocommit=True
+        )
+
+        logging.info("Connection successful.")
+
+        cursor = conn.cursor()
+
+        # Run a simple query
+        cursor.execute(QUERY)
+        row = cursor.fetchone()
+        print(f"✅ Connected as: {row.UserName} (Original Login: {row.OriginalLogin})")
+
+        # Optional: Run a parameterized query
+        logging.info("Running parameterized query: %s", PARAM_QUERY)
+        cursor.execute(PARAM_QUERY, (PARAM_VALUE,))
+        results = cursor.fetchall()
+
+        print(f"\n📄 Results for parameter '{PARAM_VALUE}':")
+        for r in results:
+            print(r)
+
+        cursor.close()
+        conn.close()
+
+    except pyodbc.Error as e:
+        error_msg = f"❌ Connection or query failed: {str(e)}"
+        print(error_msg)
+        logging.error(error_msg)
+
+if __name__ == "__main__":
+    start_time = datetime.now()
+    print("🚀 Starting SQL Server Kerberos test...")
+    connect_and_query()
+    print(f"🕒 Done in {datetime.now() - start_time}")
+📝 Notes
+Replace YourTable and Column1 with your actual table and column.
+
+PARAM_VALUE can be dynamically populated from input or environment variables.
+
+The log file (sql_kerberos_query.log) will contain time-stamped logs of connection and query activity.
+
+The parameterized query prevents SQL injection.
+
+Here’s an example of a command-line SQL Server connection from a Linux machine using the official Microsoft sqlcmd tool and Kerberos authentication:
+
+✅ Example: Connect using Kerberos (Active Directory login)
+Assuming:
+
+You have a valid Kerberos ticket (via kinit)
+
+SQL Server supports Windows authentication
+
+The ODBC driver and sqlcmd are installed
+
+bash
+Copy
+Edit
+sqlcmd -S sqlserver.domain.com -d YourDatabase -G
+📌 Explanation:
+
+-S: SQL Server hostname or FQDN (optionally include port, e.g. sqlserver.domain.com,1433)
+
+-d: Target database name
+
+-G: Use Kerberos (integrated) authentication
+
+You must have run:
+
+bash
+Copy
+Edit
+kinit youruser@DOMAIN.COM
+before executing this.
+
+❗ Optional: Specify Query
+You can also run a single query:
+
+bash
+Copy
+Edit
+sqlcmd -S sqlserver.domain.com -d YourDatabase -G -Q "SELECT SYSTEM_USER, CURRENT_USER;"
+💡 Alternative (with ODBC DSN):
+If you've defined a DSN named MSSQL_KERBEROS in /etc/odbc.ini:
+
+bash
+Copy
+Edit
+isql -v MSSQL_KERBEROS -k
+or via sqlcmd:
+
+bash
+Copy
+Edit
+sqlcmd -S MSSQL_KERBEROS -G
+
+Here’s a one-liner you can use to test a Kerberos-authenticated SQL Server connection from Linux and log the output to a file for debugging:
+
+📝 Make sure you’ve already authenticated with kinit.
+
+🔧 One-liner command:
+
+bash
+Copy
+Edit
+sqlcmd -S sqlserver.domain.com -d YourDatabase -G -Q "SELECT SYSTEM_USER, ORIGINAL_LOGIN();" -o sql_test_output.txt
+📌 Explanation:
+
+-S: SQL Server hostname (e.g., sqlserver.domain.com or sqlserver.domain.com,1433 if using a non-default port)
+
+-d: The database to connect to
+
+-G: Use Kerberos authentication (Active Directory Integrated)
+
+-Q: A query to run immediately
+
+-o: Output file to store results
+
+🧪 To view the result:
+
+bash
+Copy
+Edit
+cat sql_test_output.txt
+📁 To also capture errors, you can redirect stderr:
+
+bash
+Copy
+Edit
+sqlcmd -S sqlserver.domain.com -d YourDatabase -G -Q "SELECT SYSTEM_USER;" -o sql_test_output.txt 2
