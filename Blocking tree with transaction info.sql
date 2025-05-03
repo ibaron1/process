@@ -29,7 +29,7 @@ BlockingTree AS (
         r.sql_handle,
         r.plan_handle,
         r.wait_resource,
-        s.transaction_isolation_level
+        s.transaction_isolation_level -- Get the isolation level from sys.dm_exec_sessions
     FROM sys.dm_exec_sessions s
     LEFT JOIN Requests r ON s.session_id = r.session_id
     WHERE 
@@ -92,27 +92,30 @@ SELECT
     END AS sql_text,
     qp.query_plan AS execution_plan_xml,
     tr.transaction_id,
-    CASE txn.database_transaction_type 
-        WHEN 1 THEN 'Read/write'
-        WHEN 2 THEN 'Read-only transaction'
-        WHEN 3 THEN 'System transaction'
-        ELSE NULL 
-    END AS database_transaction_type,
-    CASE txn.database_transaction_state
-        WHEN 1 THEN 'transaction has not been initialized'
-        WHEN 3 THEN 'transaction has been initialized but has not generated any log records'
-        WHEN 4 THEN 'The transaction has generated log records'
-        WHEN 5 THEN 'transaction has been prepared'
-        WHEN 10 THEN 'transaction has been committed'
-        WHEN 11 THEN 'transaction has been rolled back'
-        WHEN 12 THEN 'transaction is being committed. (The log record is being generated, but has not been materialized or persisted)'
-    END AS database_transaction_state,
+    case txn.database_transaction_type 
+        when 1 then 'Read/write'
+        when 2 then 'Read-only transaction'
+        when 3 then 'System transaction'
+        else NULL end as database_transaction_type,
+    case txn.database_transaction_state
+        when 1 then 'transaction has not been initialized'
+        when 3 then 'transaction has been initialized but has not generated any log records'
+        when 4 then 'The transaction has generated log records'
+        when 5 then 'transaction has been prepared'
+        when 10 then 'transaction has been committed'
+        when 11 then 'transaction has been rolled back'
+        when 12 then 'transaction is being committed. (The log record is being generated, but has not been materialized or persisted)'
+    end as database_transaction_state,
     txn.database_transaction_begin_time,
-    DATEDIFF(SECOND, txn.database_transaction_begin_time, GETDATE()) AS transaction_duration_seconds
+    CASE 
+        WHEN txn.database_transaction_begin_time IS NOT NULL 
+        THEN DATEDIFF(SECOND, txn.database_transaction_begin_time, GETDATE())
+        ELSE NULL
+    END AS transaction_duration_seconds
 FROM Tree t
 JOIN BlockingTree bt ON t.session_id = bt.session_id
-OUTER APPLY sys.dm_exec_sql_text(bt.sql_handle) AS st
-OUTER APPLY sys.dm_exec_sql_text(bt.sql_handle) AS st2
+OUTER APPLY sys.dm_exec_sql_text(bt.sql_handle) AS st -- For the blocker session
+OUTER APPLY sys.dm_exec_sql_text(bt.sql_handle) AS st2 -- For the blocked session (can be different)
 OUTER APPLY sys.dm_exec_query_plan(bt.plan_handle) AS qp
 LEFT JOIN sys.dm_tran_session_transactions tr ON bt.session_id = tr.session_id
 LEFT JOIN sys.dm_tran_database_transactions txn ON tr.transaction_id = txn.transaction_id
