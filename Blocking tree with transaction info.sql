@@ -11,6 +11,7 @@ WITH Requests AS (
         r.start_time,
         r.database_id
     FROM sys.dm_exec_requests r
+	where (r.blocking_session_id IS NULL OR r.blocking_session_id != 0)
 ),
 BlockingTree AS (
     SELECT 
@@ -36,7 +37,6 @@ BlockingTree AS (
         s.is_user_process = 1
         AND s.session_id != 0
         AND s.status != 'sleeping'
-        AND (r.blocking_session_id IS NULL OR r.blocking_session_id != 0)
 ),
 Tree AS (
     SELECT 
@@ -82,30 +82,36 @@ SELECT
     bt.wait_type,
     bt.wait_time,
     bt.wait_resource,
+    bt.sql_handle, -- Include sql_handle for debugging
+    -- Fetch SQL Text for the Blocking Session from sys.dm_exec_requests
     CASE 
-        WHEN bt.session_id = bt.blocking_session_id THEN LEFT(ISNULL(st.text, 'No SQL Text Available'), 4000) 
+        WHEN bt.session_id = bt.blocking_session_id THEN 
+            LEFT(ISNULL(st.text, 'No SQL Text Available'), 4000)  -- For the blocker session
         ELSE NULL 
     END AS blocking_sql_text,
+    -- Fetch SQL Text for the Blocked Session
     CASE 
-        WHEN bt.session_id != bt.blocking_session_id THEN LEFT(ISNULL(st2.text, 'No SQL Text Available'), 4000)
+        WHEN bt.session_id != bt.blocking_session_id THEN 
+            LEFT(ISNULL(st2.text, 'No SQL Text Available'), 4000)  -- For the blocked session
         ELSE NULL
     END AS sql_text,
     qp.query_plan AS execution_plan_xml,
     tr.transaction_id,
-    case txn.database_transaction_type 
-        when 1 then 'Read/write'
-        when 2 then 'Read-only transaction'
-        when 3 then 'System transaction'
-        else NULL end as database_transaction_type,
-    case txn.database_transaction_state
-        when 1 then 'transaction has not been initialized'
-        when 3 then 'transaction has been initialized but has not generated any log records'
-        when 4 then 'The transaction has generated log records'
-        when 5 then 'transaction has been prepared'
-        when 10 then 'transaction has been committed'
-        when 11 then 'transaction has been rolled back'
-        when 12 then 'transaction is being committed. (The log record is being generated, but has not been materialized or persisted)'
-    end as database_transaction_state,
+    CASE txn.database_transaction_type 
+        WHEN 1 THEN 'Read/write'
+        WHEN 2 THEN 'Read-only transaction'
+        WHEN 3 THEN 'System transaction'
+        ELSE NULL 
+    END AS database_transaction_type,
+    CASE txn.database_transaction_state
+        WHEN 1 THEN 'transaction has not been initialized'
+        WHEN 3 THEN 'transaction has been initialized but has not generated any log records'
+        WHEN 4 THEN 'The transaction has generated log records'
+        WHEN 5 THEN 'transaction has been prepared'
+        WHEN 10 THEN 'transaction has been committed'
+        WHEN 11 THEN 'transaction has been rolled back'
+        WHEN 12 THEN 'transaction is being committed. (The log record is being generated, but has not been materialized or persisted)'
+    END AS database_transaction_state,
     txn.database_transaction_begin_time,
     CASE 
         WHEN txn.database_transaction_begin_time IS NOT NULL 
@@ -114,6 +120,7 @@ SELECT
     END AS transaction_duration_seconds
 FROM Tree t
 JOIN BlockingTree bt ON t.session_id = bt.session_id
+-- Join sys.dm_exec_requests to get SQL Text for the blocking session
 OUTER APPLY sys.dm_exec_sql_text(bt.sql_handle) AS st -- For the blocker session
 OUTER APPLY sys.dm_exec_sql_text(bt.sql_handle) AS st2 -- For the blocked session (can be different)
 OUTER APPLY sys.dm_exec_query_plan(bt.plan_handle) AS qp
