@@ -34,10 +34,14 @@ DistinctPermissions AS (
     SELECT DISTINCT
         dp.name AS UserName,
         perm.permission_name,
-        OBJECT_SCHEMA_NAME(perm.major_id) AS SchemaName
+        s.name AS SchemaName
     FROM sys.database_permissions perm
     JOIN sys.database_principals dp ON perm.grantee_principal_id = dp.principal_id
-    WHERE perm.class IN (1, 3)
+    LEFT JOIN sys.objects o ON perm.major_id = o.object_id AND perm.class = 1
+    LEFT JOIN sys.schemas s ON 
+        (perm.class = 1 AND o.schema_id = s.schema_id) OR
+        (perm.class = 3 AND perm.major_id = s.schema_id)
+    WHERE perm.class IN (1, 3)  -- Object-level or schema-level
 ),
 -- Aggregate permissions per user + schema
 AggregatedPermissions AS (
