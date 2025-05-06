@@ -1,0 +1,3 @@
+./FindSqlPort.exe -Server myserver.local -StartPort 1433 -EndPort 1500
+
+./FindSqlPort.exe -Server server -StartPort 64918 -EndPort 64920
