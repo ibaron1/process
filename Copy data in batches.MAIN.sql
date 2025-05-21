@@ -1,6 +1,7 @@
 -- Assumptions:
 -- #TableList contains a column called TableName (no schema prefix)
 -- Source and Target schemas are defined below
+SET NOCOUNT OFF;
 
 DECLARE @SourceSchema NVARCHAR(128) = 'dbo';
 DECLARE @TargetSchema NVARCHAR(128) = 'archive';
@@ -52,24 +53,34 @@ BEGIN
 	FROM INFORMATION_SCHEMA.COLUMNS
 	WHERE TABLE_SCHEMA = @SourceSchema AND TABLE_NAME = @TableName;
 
+	DECLARE @hasIdentityClmn INT = 0;
+	
+	IF EXISTS 
+	(SELECT 1 FROM sys.identity_columns ic
+	JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+	JOIN sys.tables t ON c.object_id = t.object_id
+	WHERE t.name = @TableName
+    AND t.schema_id = SCHEMA_ID(@TargetSchema))
+		SET @hasIdentityClmn = 1;
+
 	WHILE @j <= @maxCurTbl
 	BEGIN
 		SET @SQL = 
-		CONCAT('SET IDENTITY_INSERT ',@TargetSchema,'.',@TableName,' ON;
+		CONCAT(IIF(@hasIdentityClmn = 1, CONCAT('SET IDENTITY_INSERT ',@TargetSchema,'.',@TableName,' ON;'),''),'
 		WITH CTE_Batch AS (
 			SELECT ', @ColumnList, ', ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS RowNum
 			FROM ',@SourceSchema,'.',@TableName,')
 		INSERT ',@TargetSchema,'.',@TableName,' (', @ColumnList, ')
 		SELECT ', @ColumnList, ' FROM CTE_Batch
-		WHERE RowNum >= ', @j, ' AND RowNum < ', @j + @BatchSize, ';
-		SET IDENTITY_INSERT ',@TargetSchema,'.',@TableName,' OFF;');
+		WHERE RowNum >= ', @j, ' AND RowNum < ', @j + @BatchSize, ';',
+		IIF(@hasIdentityClmn = 1, CONCAT('SET IDENTITY_INSERT ',@TargetSchema,'.',@TableName,' OFF;'),''));
 
 
 		--print @SQL;
 
 		-- Execute it
 		EXEC (@SQL);
-		
+
 		SET @j += @BatchSize;
 
 		END;
