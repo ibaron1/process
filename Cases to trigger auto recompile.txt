@@ -1,0 +1,42 @@
+SQL Server may recompile stored procedures for several reasons, and understanding these can help you optimize performance and reduce unnecessary recompilations. Here are the most common causes:
+
+🔁 1. Schema Changes
+Any change to the structure of a referenced table (such as adding or dropping columns, indexes, or changing data types) will trigger recompilation of any dependent stored procedures.
+
+📈 2. Statistics Updates
+When SQL Server updates the statistics on a table or index (automatically or manually), the optimizer might decide to recompile queries that depend on those statistics.
+
+Auto Update Statistics feature can cause this.
+
+This is usually beneficial but can cause unexpected recompilations in high-frequency procedures.
+
+🧮 3. SET Options
+If the SET options (e.g., ANSI_NULLS, QUOTED_IDENTIFIER, etc.) used at execution time are different from those used at compile time, SQL Server may recompile the stored procedure.
+
+🔍 4. Temporary Tables and Table Variables
+Use of temporary tables (especially in procedures with complex logic) can cause recompilations because SQL Server may not be able to cache execution plans across calls with different temp table usage.
+
+📊 5. Parameter Sniffing and Recompilation Hints
+If the stored procedure is executed with parameters that lead to very different query plans, SQL Server may recompile it to optimize for the new values.
+
+Use of RECOMPILE query hint or OPTION (RECOMPILE) in the procedure body causes recompilation on each execution.
+
+⏱️ 6. Memory Pressure
+SQL Server may evict execution plans from the cache due to memory pressure, leading to recompilation when the procedure is run again.
+
+🧠 7. Deferred Compilation (SQL Server 2019+)
+Introduced for table variables and scalar functions. Compilation may be deferred until runtime, which can sometimes cause apparent recompilation if the procedure is run with different values or logic paths.
+
+🔧 How to Diagnose Recompilation
+Use SQL Server Profiler: Look for events like SP:Recompile, SQL:StmtRecompile.
+
+Extended Events: Set up an event session for stored procedure recompilations.
+
+DMVs:
+
+Edit
+SELECT * FROM sys.dm_exec_cached_plans
+CROSS APPLY sys.dm_exec_sql_text(plan_handle)
+WHERE objtype = 'Proc'
+Look at usecounts, last_execution_time, and cacheobjtype.
+
