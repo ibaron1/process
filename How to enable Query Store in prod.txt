@@ -1,0 +1,179 @@
+how to enable query store in sql server in prod without causing excessive pressure in prod database
+
+
+ChatGPT said:
+Enabling Query Store in a SQL Server production environment should be done carefully to avoid performance impacts. Here's a step-by-step guide to enable it with minimal disruption:
+
+✅ 1. Understand Query Store Basics
+Query Store captures query execution plans and runtime statistics, which can be helpful for performance troubleshooting and query tuning.
+
+However, it uses additional disk space and I/O, so enabling it abruptly with default settings in production can cause overhead, especially on busy systems.
+
+✅ 2. Evaluate SQL Server Version
+Make sure you're using:
+
+SQL Server 2016 SP2 or later, or
+
+SQL Server 2017 or later
+
+These versions include important Query Store improvements.
+
+✅ 3. Enable Query Store in a Controlled Manner
+Use the following SQL script to enable Query Store with minimal impact:
+
+sql
+Copy
+Edit
+ALTER DATABASE [YourDatabaseName]
+SET QUERY_STORE = ON;
+
+ALTER DATABASE [YourDatabaseName]
+SET QUERY_STORE (
+    OPERATION_MODE = READ_WRITE,
+    CLEANUP_POLICY = (STALE_QUERY_THRESHOLD_DAYS = 7),
+    DATA_FLUSH_INTERVAL_SECONDS = 900,
+    INTERVAL_LENGTH_MINUTES = 60,
+    MAX_STORAGE_SIZE_MB = 1000,
+    QUERY_CAPTURE_MODE = AUTO
+);
+Key Settings Explained:
+DATA_FLUSH_INTERVAL_SECONDS = 900 (15 min): Reduces the frequency of disk writes.
+
+INTERVAL_LENGTH_MINUTES = 60: Aggregates data hourly, reducing overhead.
+
+QUERY_CAPTURE_MODE = AUTO: Skips very frequent and trivial queries.
+
+MAX_STORAGE_SIZE_MB: Limit to avoid unbounded disk usage.
+
+STALE_QUERY_THRESHOLD_DAYS: Controls retention and cleanup to limit space.
+
+✅ 4. Monitor Impact After Enabling
+Monitor:
+
+Disk I/O on data drive
+
+sys.database_query_store_options for stats
+
+Wait types like QDS_SHUTDOWN_QUEUE, QDS_CLEANUP_STALE_QUERIES_TASK
+
+✅ 5. Roll Back if Needed
+You can safely disable Query Store if there's any degradation:
+
+ALTER DATABASE [YourDatabaseName]
+SET QUERY_STORE = OFF;
+
+✅ 6. Gradual Rollout Strategy
+If you have multiple databases or instances:
+
+Enable on one database first.
+
+Monitor for a day or two.
+
+Roll out to others in phases.
+
+Optional: Advanced Controls
+If needed, use QUERY_CAPTURE_POLICY = STALE_CAPTURE_POLICY in SQL Server 2019+ for finer capture logic.
+
+✅ SQL to Enable Query Store with STALE_CAPTURE_POLICY:
+sql
+Copy
+Edit
+ALTER DATABASE [YourDatabaseName]
+SET QUERY_STORE = ON;
+
+ALTER DATABASE [YourDatabaseName]
+SET QUERY_STORE (
+    OPERATION_MODE = READ_WRITE,
+    CLEANUP_POLICY = (STALE_QUERY_THRESHOLD_DAYS = 7),
+    DATA_FLUSH_INTERVAL_SECONDS = 900,
+    INTERVAL_LENGTH_MINUTES = 60,
+    MAX_STORAGE_SIZE_MB = 1000,
+    QUERY_CAPTURE_MODE = CUSTOM,
+    QUERY_CAPTURE_POLICY = (
+        STALE_CAPTURE_POLICY = ON,
+        EXECUTION_COUNT = 30,
+        TOTAL_COMPILE_CPU_TIME_MS = 1000,
+        TOTAL_EXECUTION_CPU_TIME_MS = 10000
+    )
+);
+
+🔍 Explanation of the Key Settings
+QUERY_CAPTURE_MODE = CUSTOM
+Required to use a custom QUERY_CAPTURE_POLICY.
+
+STALE_CAPTURE_POLICY = ON
+Only captures query plans/stats if they haven’t changed in a while or if thresholds are exceeded.
+
+EXECUTION_COUNT = 30
+Query must execute at least this many times before being captured.
+
+TOTAL_COMPILE_CPU_TIME_MS = 1000
+Only queries with at least 1000 ms of total compile time are captured.
+
+TOTAL_EXECUTION_CPU_TIME_MS = 10000
+Only queries with at least 10 seconds of total CPU time are captured.
+
+These thresholds ensure low-impact queries are ignored, reducing Query Store overhead in production environments.
+
+✅ SQL Query to View Query Store Settings
+sql
+Copy
+Edit
+SELECT 
+    actual_state_desc,
+    desired_state_desc,
+    readonly_reason,
+    current_storage_size_mb,
+    max_storage_size_mb,
+    flush_interval_seconds,
+    interval_length_minutes,
+    stale_query_threshold_days,
+    capture_mode_desc,
+    query_capture_mode_desc,
+    custom_capture_policy_execution_count,
+    custom_capture_policy_total_compile_cpu_time_ms,
+    custom_capture_policy_total_execution_cpu_time_ms,
+    custom_capture_policy_stale_threshold_hours
+FROM sys.database_query_store_options;
+🔍 Explanation of Key Columns:
+actual_state_desc: Shows whether Query Store is currently ON, OFF, or in READ_ONLY.
+
+readonly_reason: If Query Store is read-only, this tells you why.
+
+current_storage_size_mb / max_storage_size_mb: Shows how much space is used and allowed.
+
+capture_mode_desc / query_capture_mode_desc: Shows if Query Store is using AUTO, ALL, or CUSTOM capture.
+
+custom_capture_policy_*: These show thresholds used when QUERY_CAPTURE_MODE = CUSTOM.
+
+✅ SQL Script to Check Query Store Settings for All Databases
+sql
+Copy
+Edit
+DECLARE @sql NVARCHAR(MAX) = N'';
+SELECT @sql += '
+USE [' + name + '];
+SELECT
+    DB_NAME() AS database_name,
+    actual_state_desc,
+    desired_state_desc,
+    readonly_reason,
+    current_storage_size_mb,
+    max_storage_size_mb,
+    flush_interval_seconds,
+    interval_length_minutes,
+    stale_query_threshold_days,
+    capture_mode_desc,
+    query_capture_mode_desc,
+    custom_capture_policy_execution_count,
+    custom_capture_policy_total_compile_cpu_time_ms,
+    custom_capture_policy_total_execution_cpu_time_ms,
+    custom_capture_policy_stale_threshold_hours
+FROM sys.database_query_store_options;
+'
+FROM sys.databases
+WHERE state_desc = 'ONLINE'
+  AND is_query_store_on = 1;
+
+EXEC sp_executesql @sql;
+
