@@ -63,6 +63,9 @@ BEGIN
     DECLARE @key_concat_expr NVARCHAR(MAX) = '';
     DECLARE @nonkey_columns NVARCHAR(MAX) = '';
     DECLARE @key_count INT;
+    DECLARE @select_diff_cols NVARCHAR(MAX) = '';
+    DECLARE @unpivot_cols_a NVARCHAR(MAX) = '';
+    DECLARE @unpivot_cols_b NVARCHAR(MAX) = '';
 
     -- Get key info
     SELECT @key_count = COUNT(1)
@@ -101,8 +104,12 @@ BEGIN
         JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
         WHERE i.object_id = @object_id AND i.is_unique = 1 AND i.type IN (1, 2);
 
-    -- Get non-key, non-date columns
-    SELECT @nonkey_columns = STRING_AGG(QUOTENAME(name), ', ')
+    -- Get non-key columns
+    SELECT 
+        @nonkey_columns = STRING_AGG(QUOTENAME(name), ', '),
+        @select_diff_cols = STRING_AGG('t1.' + QUOTENAME(name) + ' AS a_' + name + ', t2.' + QUOTENAME(name) + ' AS b_' + name, ', '),
+        @unpivot_cols_a = STRING_AGG('a_' + name, ', '),
+        @unpivot_cols_b = STRING_AGG('b_' + name, ', ')
     FROM sys.columns
     WHERE object_id = @object_id 
       AND name NOT IN ('asof_dt', 'update_dt', 'revised_dt')
@@ -133,29 +140,36 @@ BEGIN
 
     -- Unpivot mismatched rows
     WITH Diff AS (
-        SELECT t1.*, t2.*
+        SELECT ' + @key_concat_expr + ' AS mismatch_key, ' + @select_diff_cols + '
         FROM #t1 t1
         JOIN #t2 t2 ON ' + @key_join + '
     ),
-    Unpivoted AS (
+    UnpivotedA AS (
+        SELECT mismatch_key, col AS column_name, val1
+        FROM Diff
+        UNPIVOT (val1 FOR col IN (' + @unpivot_cols_a + ')) AS upvtA
+    ),
+    UnpivotedB AS (
+        SELECT mismatch_key, col AS column_name, val2
+        FROM Diff
+        UNPIVOT (val2 FOR col IN (' + @unpivot_cols_b + ')) AS upvtB
+    ),
+    FinalDiff AS (
         SELECT 
             ''' + @table_name + ''' AS table_name,
-            ' + @key_concat_expr + ' AS mismatch_key,
-            col,
-            val1,
-            val2
-        FROM Diff
-        UNPIVOT (val1 FOR col IN (' + @nonkey_columns + ')) AS u1
-        JOIN (
-            SELECT * FROM Diff
-        ) t2
-        UNPIVOT (val2 FOR col2 IN (' + @nonkey_columns + ')) AS u2
-        ON col = col2
-        WHERE ISNULL(CONVERT(NVARCHAR(MAX), val1), ''<NULL>'') <> ISNULL(CONVERT(NVARCHAR(MAX), val2), ''<NULL>'')
+            a.mismatch_key,
+            REPLACE(a.column_name, ''a_'', '''') AS column_name,
+            CONVERT(NVARCHAR(MAX), a.val1) AS value_schemaA,
+            CONVERT(NVARCHAR(MAX), b.val2) AS value_schemaB
+        FROM UnpivotedA a
+        JOIN UnpivotedB b
+            ON a.mismatch_key = b.mismatch_key AND a.column_name = b.column_name
+        WHERE ISNULL(CONVERT(NVARCHAR(MAX), a.val1), ''<NULL>'') 
+           <> ISNULL(CONVERT(NVARCHAR(MAX), b.val2), ''<NULL>'')
     )
     INSERT INTO dbo.recon_log (table_name, mismatch_key, column_name, value_schemaA, value_schemaB, schemaA, schemaB)
-    SELECT table_name, mismatch_key, col, CONVERT(NVARCHAR(MAX), val1), CONVERT(NVARCHAR(MAX), val2), ''' + @schemaA + ''', ''' + @schemaB + '''
-    FROM Unpivoted;
+    SELECT table_name, mismatch_key, column_name, value_schemaA, value_schemaB, ''' + @schemaA + ''', ''' + @schemaB + '''
+    FROM FinalDiff;
 
     -- Summary
     DECLARE @onlyA INT = (
@@ -179,7 +193,7 @@ BEGIN
            (SELECT COUNT(1) FROM #t1),
            (SELECT COUNT(1) FROM #t2),
            0,
-           (SELECT COUNT(1) FROM dbo.recon_log WHERE table_name = ''' + @table_name + '''),
+           (SELECT COUNT(1) FROM dbo.recon_log WHERE table_name = ''' + @table_name + ''' AND schemaA = ''' + @schemaA + ''' AND schemaB = ''' + @schemaB + '''),
            @onlyB, @onlyA,
            ''' + @schemaA + ''', ''' + @schemaB + ''';
 
