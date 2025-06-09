@@ -1,0 +1,21 @@
+✅ Example usage:
+On Windows (PowerShell):
+powershell
+
+
+Edit
+.\gen_keytab.ps1 `
+    -ServiceAccount "DOMAIN\svc_sql_linux" `
+    -ServicePrincipal "MSSQLSvc/sqlserver.domain.com" `
+    -Realm "DOMAIN.COM" `
+    -LinuxHost "192.168.1.100" `
+    -LinuxUser "ubuntu" `
+    -Password "SuperSecret123!"
+
+
+On Linux:
+bash
+
+Edit
+chmod +x setup_kerberos.sh
+./setup_kerberos.sh DOMAIN.COM dc01.domain.com MSSQLSvc/sqlserver.domain.com@DOMAIN.COM /etc/security/keyta

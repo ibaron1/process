@@ -1,0 +1,3 @@
+chmod +x setup_kerberos.sh
+
+./setup_kerberos.sh DOMAIN.COM dc01.domain.com MSSQLSvc/sqlserver.domain.com@DOMAIN.COM /etc/security/keytabs/service.keytab

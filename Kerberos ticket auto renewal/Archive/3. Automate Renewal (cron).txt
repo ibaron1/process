@@ -1,0 +1,10 @@
+Edit crontab:
+bash
+
+crontab -e
+W
+Add:
+
+*/30 * * * * /opt/kerberos/renew_kerberos.sh >/dev/null 2>&1
+
+This runs every 30 minutes.
