@@ -1,0 +1,30 @@
+You can create a permanent alias for a full path command in Linux by adding it to your shell's configuration file, typically ~/.bashrc (for Bash) or ~/.zshrc (for Zsh). 
+Steps:
+Open the configuration file:
+Use a text editor to open your shell's configuration file. For example, if you're using Bash, you can use:
+bash
+nano ~/.bashrc
+Add your alias:
+Go to the bottom of the file and add your alias using the following syntax:
+bash
+alias alias_name='full_path_to_command'
+alias_name: The name you want to use as a shortcut for the command.
+full_path_to_command: The complete path to the executable file.
+Example:
+To create an alias called myeditor for an executable located at /home/user/my-editor-executable:
+bash
+alias myeditor='/home/user/my-editor-executable'
+Save and close the file:
+Save the changes to the file and exit the text editor.
+Activate the changes:
+To make the new alias available in your current terminal session, you need to either:
+Restart your terminal.
+Source the configuration file:
+bash
+source ~/.bashrc  # Or ~/.zshrc for Zsh
+ 
+Explanation:
+The alias command creates a shortcut that replaces the alias_name with the full_path_to_command when you type the alias in your terminal.
+By adding the alias to your shell's configuration file (~/.bashrc or ~/.zshrc), you ensure that the alias is loaded every time you start a new terminal session.
+The source command executes the commands in the specified file within the current shell, applying the changes to the current session. 
+Note: If you replace an existing command with an alias of the same name, executing the name will always execute the alias. To use the original command, you'll need to specify its full path (e.g., /usr/bin/mkdir). 
