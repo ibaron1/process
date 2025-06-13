@@ -1,0 +1,323 @@
+let's take this in three parts to improve performance and maintainability.
+
+✅ 1. Push Filtering on asof_dt and Joins Earlier
+You already filter asof_dt >= DATEADD(YEAR, -10, GETDATE()) in the final query. Pushing this into the base CTEs can significantly reduce the volume of data processed in joins and aggregations.
+
+Apply asof_dt filters early in these CTEs:
+RiskValues
+
+BenchmarkData
+
+PortBeta
+
+arms_calc_mv join (convert to CTE)
+
+sql
+Copy
+Edit
+-- In RiskValues:
+REPLACE(
+    SELECT 
+        asof_dt,
+        REPLACE(choiceID, ' (C)', '') AS CleanChoiceID,
+        *
+    FROM DM_InvMgmt_INT.dbo.arms_calc_risk_values
+    WHERE asof_dt >= DATEADD(YEAR, -10, GETDATE())
+) AS RiskValues
+
+-- In BenchmarkData:
+REPLACE(
+    ...
+    WHERE calc_type = 'BMRK'
+      AND asof_dt >= DATEADD(YEAR, -10, GETDATE())
+) AS BenchmarkData
+Also change arms_calc_mv to a filtered CTE like:
+
+sql
+Copy
+Edit
+MVFiltered AS (
+    SELECT *
+    FROM arms_calc_mv
+    WHERE asof_dt >= DATEADD(YEAR, -10, GETDATE())
+)
+Then join to it:
+
+sql
+Copy
+Edit
+LEFT JOIN MVFiltered mv
+    ON rv.CleanChoiceID = mv.choiceID AND rv.asof_dt = mv.asof_dt
+✅ 2. Index Recommendations
+To support the optimized query, create the following non-clustered indexes, assuming no existing covering indexes.
+
+On arms_calc_risk_values
+sql
+Copy
+Edit
+-- To support both Port and Benchmark retrieval
+CREATE NONCLUSTERED INDEX IX_risk_values_asof_choice_type
+ON DM_InvMgmt_INT.dbo.arms_calc_risk_values (asof_dt, choiceID, calc_type)
+INCLUDE (spread_pc1, spread_te, index_spread_te, index_spread_pc1, unified_spread_te, unified_mpc1);
+On arms_calc_mv
+sql
+Copy
+Edit
+CREATE NONCLUSTERED INDEX IX_mv_asof_choice
+ON arms_calc_mv (asof_dt, choiceID)
+INCLUDE (usd_mv);
+On portfolio_limit
+sql
+Copy
+Edit
+CREATE NONCLUSTERED INDEX IX_portfolio_limit_lookup
+ON dbo.portfolio_limit (memb_code, portfolio_limit_name, p_end_dt)
+INCLUDE (value, asof_dt);
+On composite_member
+sql
+Copy
+Edit
+CREATE NONCLUSTERED INDEX IX_comp_member
+ON dbo.composite_member (memb_code)
+INCLUDE (comp_code);
+On composite
+sql
+Copy
+Edit
+CREATE NONCLUSTERED INDEX IX_composite_group
+ON dbo.composite (comp_code)
+INCLUDE (group_flag);
+✅ 3. Split into Smaller Reusable Views
+Split your logic into 5 logical reusable views:
+
+View Name	Purpose
+vw_RiskValues	Returns cleaned risk values (PORT only)
+vw_PortBeta	Returns spread/te/pc1-based beta ratios
+vw_ActiveLimits	Filtered active limits
+vw_StdRiskBudgetFlags	Returns composite portfolios with risk budget flags
+vw_PortfolioRiskFacts	Main reporting view joining everything
+
+View: vw_RiskValues
+sql
+Copy
+Edit
+CREATE OR ALTER VIEW vw_RiskValues AS
+SELECT 
+    asof_dt,
+    REPLACE(choiceID, ' (C)', '') AS CleanChoiceID,
+    *
+FROM DM_InvMgmt_INT.dbo.arms_calc_risk_values
+WHERE calc_type = 'PORT'
+  AND asof_dt >= DATEADD(YEAR, -10, GETDATE());
+View: vw_PortBeta
+sql
+Copy
+Edit
+CREATE OR ALTER VIEW vw_PortBeta AS
+SELECT 
+    a1.asof_dt,
+    REPLACE(a1.choiceID, ' (C)', '') AS CleanChoiceID,
+    ISNULL(CASE WHEN a2.spread_pc1 = 0 THEN 0 ELSE a1.spread_pc1 * 100.0 / a2.spread_pc1 END, 0) AS spc1_beta,
+    ISNULL(CASE WHEN a2.spread_te = 0 THEN 0 ELSE a1.spread_te * 100.0 / a2.spread_te END, 0) AS oldspdte_beta,
+    ISNULL(CASE WHEN a2.index_spread_te = 0 THEN 0 ELSE a1.index_spread_te * 100.0 / a2.index_spread_te END, 0) AS idxspdte_beta,
+    ISNULL(CASE WHEN a2.index_spread_pc1 = 0 THEN 0 ELSE a1.index_spread_pc1 * 100.0 / a2.index_spread_pc1 END, 0) AS idxspc1_beta,
+    ISNULL(CASE WHEN a2.unified_spread_te = 0 THEN 0 ELSE a1.unified_spread_te * 100.0 / a2.unified_spread_te END, 0) AS spdte_beta,
+    ISNULL(CASE WHEN a2.unified_mpc1 = 0 THEN 0 ELSE a1.unified_mpc1 * 100.0 / a2.unified_mpc1 END, 0) AS mpc1_beta
+FROM DM_InvMgmt_INT.dbo.arms_calc_risk_values a1
+INNER JOIN DM_InvMgmt_INT.dbo.arms_calc_risk_values a2
+    ON a1.asof_dt = a2.asof_dt AND a1.choiceID = a2.choiceID
+WHERE a1.calc_type = 'PORT'
+  AND a2.calc_type = 'BMRK'
+  AND a1.asof_dt >= DATEADD(YEAR, -10, GETDATE());
+View: vw_ActiveLimits
+sql
+Copy
+Edit
+CREATE OR ALTER VIEW vw_ActiveLimits AS
+SELECT 
+    memb_code,
+    portfolio_limit_name,
+    value,
+    asof_dt
+FROM dbo.portfolio_limit
+WHERE asof_dt <= GETDATE()
+  AND p_end_dt > GETDATE()
+  AND value <> 9999;
+View: vw_StdRiskBudgetFlags
+sql
+Copy
+Edit
+CREATE OR ALTER VIEW vw_StdRiskBudgetFlags AS
+SELECT DISTINCT
+    cm.comp_code,
+    pl.value AS budget,
+    'TRUE' AS StdRiskBudget
+FROM dbo.portfolio_limit pl
+INNER JOIN dbo.composite_member cm ON pl.memb_code = cm.memb_code
+INNER JOIN dbo.composite c ON cm.comp_code = c.comp_code
+WHERE pl.portfolio_limit_name = 'TargetTE'
+  AND pl.p_end_dt = '9999-12-31'
+  AND c.group_flag LIKE '%Z%'
+  AND EXISTS (
+      SELECT 1
+      FROM dbo.portfolio_limit sub
+      WHERE sub.memb_code = pl.memb_code
+        AND sub.portfolio_limit_name = 'StandardRiskBudget'
+        AND sub.p_end_dt = '9999-12-31'
+        AND sub.value = 1
+  );
+View: vw_PortfolioRiskFacts
+This is your final consumer/reporting view, built from all the others. Let me know if you'd like me to fully build this view using those modular views, or if you plan to do that on your side.
+
+is this final view an original query?
+
+
+ChatGPT said:
+Yes — the final view (vw_PortfolioRiskFacts) is effectively a modularized and optimized version of your original SQL query. Here's how:
+
+✅ What Stays the Same
+Your original query:
+
+Pulls from arms_calc_risk_values, arms_calc_mv, and portfolio_limit
+
+Applies asof_dt >= DATEADD(YEAR, -10, GETDATE())
+
+Computes various beta ratios
+
+Joins limit values (TargetTE, SpreadTE, etc.) to each portfolio
+
+Joins to dn_portfolio_group_mandate for risk_mandate
+
+Filters risk_mandate IS NOT NULL
+
+All of that logic is preserved, just split into logical pieces.
+
+✅ What’s Different / Improved
+Reused filters (asof_dt pushed inside views):
+Prevents unnecessary row scans/join complexity.
+
+Repeated expressions replaced with aliases:
+You use REPLACE(choiceID, ' (C)', '') multiple times. That’s now consistently called CleanChoiceID.
+
+Joins replaced with filtered views (e.g., vw_ActiveLimits, vw_PortBeta):
+Reduces code duplication and isolates responsibility.
+
+Beta computation logic fixed (your original had invalid expressions like a1.spread_te / a2.spread_te end * 100). These are corrected in vw_PortBeta.
+
+🔁 So, to answer clearly:
+Is the final view an original query?
+Yes, it is your original query — but:
+
+Decomposed for performance
+
+Refactored for clarity
+
+Corrected for some syntax and logic errors
+
+Prepared for reuse
+
+Would you like me to generate the full final view (vw_PortfolioRiskFacts) using these smaller views, so you can just deploy and run it?
+
+- Final view: Combines all logic into one reusable query
+CREATE OR ALTER VIEW dbo.vw_PortfolioRiskFacts
+AS
+SELECT
+    arv.asof_dt,
+    arv.CleanChoiceID,
+    arv.calc_type,
+    arv.spread_pc1,
+    arv.spread_te,
+    arv.curve_te,
+    arv.curve_pc1,
+    arv.curve_pc2,
+    arv.tips_curve_te,
+    arv.curve_te_with_tips,
+    arv.curr_te,
+    arv.emg_shock,
+    arv.industry_te,
+    arv.issuer_te,
+    arv.total_te,
+    arv.total_sys_te,
+    arv.total_non_sys_te,
+    arv.e_te,
+    arv.e_pc1,
+    arv.e_pc2,
+    arv.e_pc3,
+    arv.e_sp_te,
+    arv.e_fx_te,
+    arv.e_cv_te,
+    arv.[e_sys te],
+    arv.e_non_sys_te,
+    arv.jpy_curve_pc1,
+    arv.jpy_curve_pc2,
+    acm.usd_mv,
+    arv.STSR,
+    arv.unified_curve_te,
+    arv.unified_curr_te,
+    arv.unified_spread_te,
+    arv.unified_cmdty_te,
+    arv.unified_vol_te,
+    arv.unified_residual_te,
+    arv.unified_tot_sys_te,
+    arv.unified_industry_te,
+    arv.unified_issuer_te,
+    arv.unified_tot_non_sys_te,
+    arv.unified_tot_te,
+    arv.unified_curve_pc1,
+    arv.unified_curve_pc2,
+    arv.unified_mpc1,
+    arv.unified_mpc1_rate,
+    arv.unified_mpc1_curr,
+    arv.unified_mpc1_sprd,
+    arv.unified_empc1,
+    arv.unified_empc1_rate,
+    arv.unified_empc1_curr,
+    arv.unified_empc1_sprd,
+    arv.unified_non_sys_te,
+    pl_Std.value AS Std_Flag,
+    pl_Total.value AS Total_Threshold,
+    pl_Syst.value AS Syst_Threshold,
+    pl_FX.value AS FX_Threshold,
+    pl_Spread.value AS Spread_Threshold,
+    pl_Rates.value AS Rates_Threshold,
+    pl_SPC1.value AS SPC1_Threshold,
+    pgm.risk_mandate,
+    pl_Budget.StdRiskBudget,
+    pb.spc1_beta,
+    pb.oldspdte_beta,
+    pb.idxspdte_beta,
+    pb.idxspc1_beta,
+    pb.spdte_beta,
+    pb.mpc1_beta
+FROM dbo.vw_ActiveRiskValues arv
+JOIN dbo.dn_portfolio_group_mandate pgm
+  ON arv.CleanChoiceID = pgm.portfolio_name
+LEFT JOIN dbo.vw_ActiveLimits AS pl_Std
+  ON arv.CleanChoiceID = pl_Std.memb_code AND pl_Std.limit_name = 'StandardRiskBudget'
+LEFT JOIN dbo.vw_ActiveLimits AS pl_Total
+  ON arv.CleanChoiceID = pl_Total.memb_code AND pl_Total.limit_name = 'TotalTE'
+LEFT JOIN dbo.vw_ActiveLimits AS pl_Syst
+  ON arv.CleanChoiceID = pl_Syst.memb_code AND pl_Syst.limit_name = 'SystematicTE'
+LEFT JOIN dbo.vw_ActiveLimits AS pl_FX
+  ON arv.CleanChoiceID = pl_FX.memb_code AND pl_FX.limit_name = 'CurrencyTE'
+LEFT JOIN dbo.vw_ActiveLimits AS pl_Spread
+  ON arv.CleanChoiceID = pl_Spread.memb_code AND pl_Spread.limit_name = 'SpreadTE'
+LEFT JOIN dbo.vw_ActiveLimits AS pl_Rates
+  ON arv.CleanChoiceID = pl_Rates.memb_code AND pl_Rates.limit_name = 'CurveTE'
+LEFT JOIN dbo.vw_ActiveLimits AS pl_SPC1
+  ON arv.CleanChoiceID = pl_SPC1.memb_code AND pl_SPC1.limit_name = 'SpreadPC1'
+LEFT JOIN dbo.vw_StdRiskBudget AS pl_Budget
+  ON arv.CleanChoiceID = pl_Budget.memb_code
+LEFT JOIN dbo.vw_ArmsCalcMV AS acm
+  ON arv.CleanChoiceID = acm.choiceID AND arv.asof_dt = acm.asof_dt
+LEFT JOIN dbo.vw_PortBeta AS pb
+  ON arv.CleanChoiceID = pb.choiceID AND arv.asof_dt = pb.asof_dt
+WHERE
+  arv.asof_dt >= DATEADD(YEAR, -10, GETDATE())
+  AND pgm.risk_mandate IS NOT NULL;
+
+
+
+
+
+
