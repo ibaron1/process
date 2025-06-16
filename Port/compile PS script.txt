@@ -1,1 +1,0 @@
-ps2exe.ps1 -inputFile FindSqlPort.ps1 -outputFile FindSqlPort.exe -noConsole

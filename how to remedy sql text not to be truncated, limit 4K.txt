@@ -1,0 +1,69 @@
+SQL Server does not have a direct "parameter" to increase the metadata storage for capturing full SQL text in system views like sys.dm_exec_requests, sys.dm_exec_query_stats, or sys.dm_exec_sql_text. However, there are a few important nuances and workarounds to help you avoid SQL text truncation:
+
+🔍 1. Understand the Truncation Limitations
+sys.dm_exec_sql_text (via sql_handle) can return up to 4,000 characters of the SQL text.
+
+sys.dm_exec_requests.statement_text and related DMVs can truncate long ad hoc or dynamic SQL beyond certain limits (e.g., 4K or 8K).
+
+Ad hoc SQL or dynamic batches may only store a stub or partial SQL text.
+
+✅ 2. Options to Avoid or Work Around Truncation
+A. Enable Query Store (SQL Server 2016+)
+Query Store captures full query text (not truncated) and performance history.
+
+Use it via:
+
+ALTER DATABASE [YourDatabase]
+SET QUERY_STORE = ON;
+
+Query text is stored in views like sys.query_store_query_text.
+
+B. Force Query Plan Caching via sp_executesql
+Dynamic SQL executed via sp_executesql is more likely to have full text available in sys.dm_exec_sql_text and sys.dm_exec_query_stats.
+
+DECLARE @sql NVARCHAR(MAX) = N'SELECT ...';
+EXEC sp_executesql @sql;
+Ad hoc SQL using plain EXEC() might be truncated.
+
+C. Use Extended Events (XEvents)
+Extended Events allow full SQL text capture with no truncation.
+
+Sample session:
+
+CREATE EVENT SESSION [CaptureLongSQLText]
+ON SERVER
+ADD EVENT sqlserver.sql_statement_completed
+(
+  ACTION(sqlserver.sql_text, sqlserver.session_id)
+  WHERE (len(sqlserver.sql_text) > 1000)
+)
+ADD TARGET package0.ring_buffer;
+
+D. Use SQL Server Profiler / Server-Side Trace (Legacy)
+Profiler can capture full SQL text, but is deprecated. Use Extended Events instead when possible.
+
+🧪 3. Check for Ad Hoc Query Limitations
+If the queries are not parameterized, they may fall under the ‘Ad Hoc’ plan cache bucket, which might only store a hashed stub to avoid memory bloat.
+
+You can monitor with:
+
+SELECT usecounts, size_in_bytes, text 
+FROM sys.dm_exec_cached_plans 
+CROSS APPLY sys.dm_exec_sql_text(plan_handle)
+WHERE objtype = 'Adhoc';
+
+Consider enabling optimize for ad hoc workloads if ad hoc bloating is a problem:
+
+EXEC sp_configure 'show advanced options', 1; RECONFIGURE;
+EXEC sp_configure 'optimize for ad hoc workloads', 1; RECONFIGURE;
+
+🔒 4. No Configuration Option to Increase DMV SQL Text Size
+There is no documented trace flag, server setting, or registry setting that increases the maximum length of SQL text returned by the DMVs.
+
+🧰 TL;DR: What You Can Do
+Technique	Captures Full SQL Text?	Notes
+Query Store	✅ Yes	Use for persistent, post-mortem analysis
+Extended Events (XEvent)	✅ Yes	Real-time and flexible
+sp_executesql	✅ Often	Helps caching and full-text retrieval
+DMVs only (dm_exec_sql_text)	❌ Sometimes truncated	Limited by internal buffers
+Profiler/Trace	✅ Yes	Deprecated; avoid for new work

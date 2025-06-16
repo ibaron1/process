@@ -1,0 +1,98 @@
+To find the root cause of a regressed query using SQL Server Query Store, follow this systematic approach:
+
+🔍 1. Identify the Regressed Query
+Run this to list top queries by regression (e.g., higher duration recently compared to historically):
+
+
+SELECT TOP 10
+    qsqt.query_sql_text,
+    q.query_id,
+    p.plan_id,
+    rs.avg_duration,
+    rs.execution_type_desc,
+    rs.last_execution_time
+FROM
+    sys.query_store_query q
+JOIN sys.query_store_query_text qsqt ON q.query_text_id = qsqt.query_text_id
+JOIN sys.query_store_plan p ON q.query_id = p.query_id
+JOIN sys.query_store_runtime_stats rs ON p.plan_id = rs.plan_id
+WHERE rs.last_execution_time > DATEADD(DAY, -7, GETUTCDATE()) -- recent
+ORDER BY rs.avg_duration DESC;
+🔎 2. Compare Execution Plans Over Time
+You can use SSMS GUI:
+
+Go to Query Store > Tracked Queries > Regressed Queries
+
+Choose the query and click Compare Plans (before and after regression)
+
+Or use T-SQL to compare plans:
+
+-- Get plans for a specific query_id
+SELECT
+    p.plan_id,
+    p.is_forced_plan,
+    p.engine_version,
+    p.compatibility_level,
+    p.query_plan
+FROM sys.query_store_plan p
+WHERE p.query_id = @YourQueryId
+ORDER BY p.last_execution_time DESC;
+Paste the query_plan XML into SSMS or use the built-in plan viewer.
+
+Look for:
+
+Change in join type (e.g., Nested Loop → Hash Match)
+
+Use of different indexes
+
+Change in estimated vs actual rows
+
+Different operators or memory grants
+
+🧠 3. Analyze Plan Regression Causes
+Common regression causes include:
+
+Outdated or incorrect statistics
+
+Missing indexes or index changes
+
+Plan parameter sniffing
+
+Query literal values changing shape of the plan
+
+Change in cardinality estimation
+
+Forced plan becoming suboptimal
+
+Query recompilation or plan cache eviction
+
+⚒️ 4. Fix Options Based on Root Cause
+Symptom	Fix
+Plan regression (due to sniffing)	Use OPTION (RECOMPILE), or parameterize properly
+Wrong plan reused	Enable OPTIMIZE FOR UNKNOWN, or Query Hints
+Missing stats	Run UPDATE STATISTICS or enable AUTO_UPDATE_STATISTICS
+Forced bad plan	Unforce bad plan or force better historical one
+Changed index usage	Rebuild/index/hint or review missing index recommendations
+
+🛠️ 5. Optional: Force a Good Plan
+If a specific historical plan worked better:
+
+
+EXEC sys.sp_query_store_force_plan @query_id = 123, @plan_id = 456;
+📊 Bonus: Visualize Regression Trends
+Use this Query Store DMV to track performance trends:
+
+
+SELECT 
+    q.query_id,
+    qt.query_sql_text,
+    rs.execution_type_desc,
+    rs.count_executions,
+    rs.avg_duration,
+    rs.last_execution_time
+FROM sys.query_store_query q
+JOIN sys.query_store_query_text qt ON q.query_text_id = qt.query_text_id
+JOIN sys.query_store_plan p ON q.query_id = p.query_id
+JOIN sys.query_store_runtime_stats rs ON p.plan_id = rs.plan_id
+WHERE q.query_id = @YourQueryId
+ORDER BY rs.last_execution_time DESC;

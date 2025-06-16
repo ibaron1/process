@@ -1,0 +1,110 @@
+🔧 Automatically Finds Regressed Queries
+➡️ And for each one, suggests a better historical plan you can choose to force.
+
+✅ Key Features:
+Detects queries where recent performance degraded
+
+Compares recent vs. historical plans
+
+Identifies the historically best-performing plan
+
+Suggests sp_query_store_force_plan for you to copy-paste
+
+📜 Script: Find Regressed Queries + Best Plan to Force
+
+DECLARE @DaysRecent INT = 3;
+DECLARE @RegressionThreshold FLOAT = 2.0;
+
+WITH PlanStats AS (
+    SELECT
+        q.query_id,
+        p.plan_id,
+        qt.query_sql_text,
+        rs.avg_duration,
+        rs.last_execution_time,
+        CASE 
+            WHEN rs.last_execution_time > DATEADD(DAY, -@DaysRecent, GETUTCDATE()) THEN 'Recent'
+            ELSE 'Historical'
+        END AS TimeCategory
+    FROM sys.query_store_query q
+    JOIN sys.query_store_query_text qt ON q.query_text_id = qt.query_text_id
+    JOIN sys.query_store_plan p ON q.query_id = p.query_id
+    JOIN sys.query_store_runtime_stats rs ON p.plan_id = rs.plan_id
+),
+RecentPlans AS (
+    SELECT query_id, plan_id, MIN(avg_duration) AS avg_duration
+    FROM PlanStats
+    WHERE TimeCategory = 'Recent'
+    GROUP BY query_id, plan_id
+),
+HistoricalPlans AS (
+    SELECT query_id, plan_id, MIN(avg_duration) AS avg_duration
+    FROM PlanStats
+    WHERE TimeCategory = 'Historical'
+    GROUP BY query_id, plan_id
+),
+BestRecent AS (
+    SELECT query_id, plan_id AS recent_plan_id, avg_duration AS recent_duration
+    FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY query_id ORDER BY avg_duration ASC) AS rn
+        FROM RecentPlans
+    ) t WHERE rn = 1
+),
+BestHistorical AS (
+    SELECT query_id, plan_id AS hist_plan_id, avg_duration AS hist_duration
+    FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY query_id ORDER BY avg_duration ASC) AS rn
+        FROM HistoricalPlans
+    ) t WHERE rn = 1
+),
+RegressionAnalysis AS (
+    SELECT 
+        r.query_id,
+        q.query_sql_text,
+        r.recent_plan_id,
+        r.recent_duration,
+        h.hist_plan_id,
+        h.hist_duration,
+        CASE 
+            WHEN h.hist_duration > 0 THEN r.recent_duration / h.hist_duration
+            ELSE NULL
+        END AS RegressionRatio
+    FROM BestRecent r
+    JOIN BestHistorical h ON r.query_id = h.query_id
+    JOIN sys.query_store_query_text q ON EXISTS (
+        SELECT 1 FROM sys.query_store_query q2 WHERE q2.query_id = r.query_id AND q2.query_text_id = q.query_text_id
+    )
+)
+SELECT TOP 20
+    query_id,
+    LEFT(query_sql_text, 4000) AS query_sql_text,
+    recent_plan_id,
+    recent_duration,
+    hist_plan_id,
+    hist_duration,
+    RegressionRatio,
+    CASE 
+        WHEN RegressionRatio >= @RegressionThreshold THEN 
+            CONCAT('EXEC sys.sp_query_store_force_plan ', query_id, ', ', hist_plan_id, ';')
+        ELSE NULL
+    END AS RecommendedFix
+FROM RegressionAnalysis
+WHERE RegressionRatio >= @RegressionThreshold
+ORDER BY RegressionRatio DESC;
+🛠️ Output Columns:
+Column	Description
+query_id	The regressed query ID
+query_sql_text	Truncated SQL query text
+recent_plan_id	The poor performing plan ID
+recent_duration	Its average duration
+hist_plan_id	The best historical plan ID
+hist_duration	Its average duration
+RegressionRatio	How many times slower the recent plan is
+RecommendedFix	The T-SQL you can run to force the good plan
+
+✅ Next Steps:
+Review high RegressionRatio queries
+
+Copy the EXEC sp_query_store_force_plan statement
+
+Paste and execute it after validation
