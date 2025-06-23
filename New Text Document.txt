@@ -1,0 +1,72 @@
+--find the Always On Availability Group Listener(s) 
+
+SELECT 
+    ag.name AS AvailabilityGroupName,
+    agl.dns_name AS ListenerDNSName,
+    agl.port AS ListenerPort,
+    agl.ip_configuration_string_from_cluster AS IPConfiguration,
+    agl.is_conformant AS IsConformant,
+    agl.create_date AS CreateDate
+FROM 
+    sys.availability_groups ag
+JOIN 
+    sys.availability_group_listeners agl ON ag.group_id = agl.group_id;
+
+
+-- Optional: Include Listener IP Addresses
+
+SELECT 
+    ag.name AS AvailabilityGroupName,
+    agl.dns_name AS ListenerDNSName,
+    agl.port AS ListenerPort,
+    aglip.ip_address,
+    aglip.subnet_mask,
+    aglip.is_dhcp,
+    aglip.network_subnet_ip,
+    aglip.network_subnet_prefix_length
+FROM 
+    sys.availability_groups ag
+JOIN 
+    sys.availability_group_listeners agl ON ag.group_id = agl.group_id
+JOIN 
+    sys.availability_group_listener_ip_addresses aglip ON agl.listener_id = aglip.listener_id;
+
+/*
+Notes:
+This only returns results if Always On Availability Groups are enabled and configured.
+
+The queries must be run on a SQL Server instance participating in an AG.
+*/
+
+--check the role (primary/secondary) of each replica for an Availability Group, along with listener info and local replica state
+
+SELECT 
+    ag.name AS AvailabilityGroupName,
+    ar.replica_server_name AS ReplicaServerName,
+    ars.role_desc AS ReplicaRole,            -- PRIMARY / SECONDARY
+    ars.connected_state_desc AS ConnectedState,
+    agl.dns_name AS ListenerDNSName,
+    agl.port AS ListenerPort,
+    aglip.ip_address AS ListenerIPAddress,
+    aglip.subnet_mask,
+    aglip.is_dhcp,
+    aglip.network_subnet_prefix_length,
+    ars.synchronization_health_desc AS SyncHealth,
+    ar.availability_mode_desc AS AvailabilityMode,
+    ar.failover_mode_desc AS FailoverMode
+FROM 
+    sys.availability_groups ag
+JOIN 
+    sys.availability_replicas ar ON ag.group_id = ar.group_id
+JOIN 
+    sys.dm_hadr_availability_replica_states ars ON ar.replica_id = ars.replica_id
+LEFT JOIN 
+    sys.availability_group_listeners agl ON ag.group_id = agl.group_id
+LEFT JOIN 
+    sys.availability_group_listener_ip_addresses aglip ON agl.listener_id = aglip.listener_id
+WHERE 
+    ars.is_local = 1;  -- Only show the current instance’s replica info
+
+
+
+
