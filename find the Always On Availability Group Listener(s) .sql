@@ -5,8 +5,8 @@ SELECT
     agl.dns_name AS ListenerDNSName,
     agl.port AS ListenerPort,
     agl.ip_configuration_string_from_cluster AS IPConfiguration,
-    agl.is_conformant AS IsConformant,
-    agl.create_date AS CreateDate
+    agl.is_conformant AS IsConformant
+   -- agl.create_date AS CreateDate
 FROM 
     sys.availability_groups ag
 JOIN 
@@ -20,7 +20,7 @@ SELECT
     agl.dns_name AS ListenerDNSName,
     agl.port AS ListenerPort,
     aglip.ip_address,
-    aglip.subnet_mask,
+    --aglip.subnet_mask,
     aglip.is_dhcp,
     aglip.network_subnet_ip,
     aglip.network_subnet_prefix_length
@@ -48,7 +48,7 @@ SELECT
     agl.dns_name AS ListenerDNSName,
     agl.port AS ListenerPort,
     aglip.ip_address AS ListenerIPAddress,
-    aglip.subnet_mask,
+    --aglip.subnet_mask,
     aglip.is_dhcp,
     aglip.network_subnet_prefix_length,
     ars.synchronization_health_desc AS SyncHealth,
