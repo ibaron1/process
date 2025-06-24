@@ -1,0 +1,57 @@
+🔄 Prerequisite
+Ensure SQL Server Configuration Manager version matches your SQL Server Native Client version (e.g., SQL Server 2019 uses SQL Server 2019 Configuration Manager).
+
+🔹 Step-by-Step
+✅ Open Configuration Manager
+Start Menu → search for:
+
+SQL Server Configuration Manager
+
+(Exact name depends on your version, e.g., "SQL Server 2019 Configuration Manager")
+
+✅ Navigate to Aliases
+In the left pane:
+
+Expand SQL Native Client Configuration or SQL Server Network Configuration, depending on your driver type:
+
+For 32-bit apps: SQL Native Client Configuration (32-bit)
+
+For 64-bit apps: SQL Native Client Configuration
+
+Click on Aliases.
+
+✅ Create New Alias
+Right-click on Aliases → choose New Alias.
+
+In the New Alias dialog box, fill out:
+
+Field	Value
+Alias Name	The name your app will use (e.g., MyDbAlias)
+Port No	Port used by the Always On Listener (typically 1433)
+Protocol	Select TCP/IP
+Server	The Listener DNS name (e.g., AGListener.domain.com)
+
+Click OK to save.
+
+✅ Test the Alias
+From the client machine (where alias was created), test connectivity using:
+
+powershell
+Copy
+Edit
+sqlcmd -S MyDbAlias -d YourDatabaseName -E
+Or use SQL Server Management Studio (SSMS) and connect to:
+
+nginx
+Copy
+Edit
+MyDbAlias
+🧠 Notes
+This alias is local to the machine where it's created.
+
+For 64-bit applications, configure the 64-bit alias.
+
+For 32-bit applications (like some legacy apps or certain ODBC drivers), configure the 32-bit alias as well (run C:\Windows\SysWOW64\SQLServerManager*.msc).
+
+If deploying to many clients, you might automate alias creation via scripts or GPO.
+
