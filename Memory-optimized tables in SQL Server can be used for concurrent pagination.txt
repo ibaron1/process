@@ -1,0 +1,72 @@
+🔧 How to Use for Concurrent Pagination
+Here’s how you can design it:
+
+1. Create a Memory-Optimized Table (Durable or Non-Durable)
+sql
+Copy
+Edit
+CREATE TABLE dbo.PaginatedCache
+(
+    RowNum INT NOT NULL PRIMARY KEY NONCLUSTERED,
+    SessionID UNIQUEIDENTIFIER NOT NULL,
+    asof_dt DATE,
+    choiceID NVARCHAR(100),
+    -- other columns...
+    INDEX IX_SessionID NONCLUSTERED HASH (SessionID) WITH (BUCKET_COUNT = 1000)
+)
+WITH (MEMORY_OPTIMIZED = ON, DURABILITY = SCHEMA_ONLY);
+Use SCHEMA_ONLY for pure in-memory temporary use (nothing written to disk).
+
+Add a SessionID or UserID column to isolate concurrent users.
+
+2. Populate It Per Session or User
+sql
+Copy
+Edit
+DECLARE @SessionID UNIQUEIDENTIFIER = NEWID();
+
+INSERT INTO dbo.PaginatedCache (RowNum, SessionID, asof_dt, choiceID, ...)
+SELECT 
+    ROW_NUMBER() OVER (ORDER BY asof_dt DESC) AS RowNum,
+    @SessionID,
+    asof_dt, choiceID, ...
+FROM dbo.fn_GetRiskValuesRaw();
+This prepares an isolated, fast, concurrent cache of full results for that session.
+
+3. Page Through It Concurrently
+sql
+Copy
+Edit
+DECLARE @PageNumber INT = 1, @PageSize INT = 500;
+
+SELECT *
+FROM dbo.PaginatedCache
+WHERE SessionID = @SessionID
+  AND RowNum BETWEEN (@PageNumber - 1) * @PageSize + 1
+                 AND @PageNumber * @PageSize
+ORDER BY RowNum;
+Multiple users can do this simultaneously using their own @SessionID.
+
+⚠️ Caveats
+Limitation	Explanation
+Requires In-Memory OLTP setup	Filegroup with MEMORY_OPTIMIZED_DATA must be configured
+SCHEMA_ONLY = no durability	Great for temp usage, but cleared on restart
+Memory use is bounded	You must manage cleanup per session
+No temp tables inside procs	But this permanent memory-optimized table acts like a temp table
+
+✅ Benefits
+Concurrency-safe (isolated by session)
+
+Extremely fast for large intermediate results
+
+Avoids tempdb locks/latches
+
+Perfect for batch jobs, paginated exports, or APIs
+
+🧠 Best Practice
+Clean up by SessionID when done:
+
+sql
+Copy
+Edit
+DELETE FROM dbo.PaginatedCache WHERE SessionID = @SessionID;
