@@ -1,0 +1,204 @@
+✅ 1. Major Optimizations
+🔍 A. Filter as Early as Possible
+The biggest issue is joining two giant tables (dn_port_bmrk_position, dn_security_ts) without filtering early.
+
+➡ Add an initial filter for asof_dt:
+Instead of
+
+sql
+Copy
+Edit
+JOIN dn_port_bmrk_position
+    ON dn_port_bmrk_position.asset_id = dn_security_ts.asset_id
+   AND dn_port_bmrk_position.asof_dt = dn_security_ts.asof_dt
+Do this in a derived table (CTE or temp table):
+
+sql
+Copy
+Edit
+SELECT *
+INTO #bmrk_position_filtered
+FROM dn_port_bmrk_position WITH (NOLOCK)
+WHERE asof_dt = (SELECT max_asof_dt FROM #temp)
+Same for dn_security_ts:
+
+sql
+Copy
+Edit
+SELECT *
+INTO #security_ts_filtered
+FROM dn_security_ts WITH (NOLOCK)
+WHERE asof_dt = (SELECT max_asof_dt FROM #temp)
+Then join on these pre-filtered small temp tables.
+
+🔍 B. Review Join Cardinality & Indexes
+Ensure you have covering indexes on:
+
+dn_port_bmrk_position (asof_dt, asset_id, portfolio_id, [measures...])
+
+dn_security_ts (asof_dt, asset_id, pgim_sector, mid_value, sec_type)
+
+dn_analytic (asof_dt, asset_id, pricing_source, pru_wal, oas)
+
+dn_security (asset_id, currency, underlying_asset_id)
+
+Use INCLUDE for frequently selected non-key columns.
+
+If possible, create filtered indexes on asof_dt = <recent date>, if queries only ever touch the latest date.
+
+🔍 C. Pre-Aggregate dn_port_bmrk_position
+If you're only aggregating measures, pre-aggregate by:
+
+asset_id
+
+portfolio_id
+
+synthetic_look_through
+
+Example pre-aggregation:
+
+sql
+Copy
+Edit
+SELECT
+    asset_id,
+    portfolio_id,
+    synthetic_look_through,
+    SUM(port_pct_mv) AS port_pct_mv,
+    SUM(bmrk_pct_mv) AS bmrk_pct_mv,
+    ...
+INTO #bmrk_agg
+FROM #bmrk_position_filtered
+GROUP BY asset_id, portfolio_id, synthetic_look_through
+Then join your aggregates rather than scanning the full table during the final GROUP BY.
+
+🔍 D. Reduce Columns in Joins
+Instead of joining entire tables, project only required columns into temp tables. Example:
+
+sql
+Copy
+Edit
+SELECT asset_id, pgim_sector, mid_value, sec_type
+INTO #security_ts_simple
+FROM #security_ts_filtered
+🔍 E. Simplify CASE Logic in GROUP BY
+All these case statements:
+
+sql
+Copy
+Edit
+CASE
+    WHEN mid_value >= 29 THEN 'AAA'
+    WHEN mid_value >= 26 THEN 'AA'
+    ELSE 'Below AA'
+END
+can be precomputed in CTEs or temp tables (#security_ts_simple), so they don’t slow down the aggregation.
+
+✅ 2. Minor Improvements
+🔧 Fix Errors
+You have typos in your CASE statements:
+
+sql
+Copy
+Edit
+WHEN 'CLO' THEN O
+WHEN 'FX' THEN O
+WHEN 'Non-US Govt Related' THEN O
+WHEN 'Total Cash' THEN O
+WHEN 'NULL' THEN O
+WHEN 'Government' THEN O
+→ These should be zero (0), not letter O.
+
+🔧 Remove Redundant NOLOCK
+You're using WITH (NOLOCK) + READ UNCOMMITTED, so the WITH (NOLOCK) is redundant unless on individual tables for clarity.
+
+🔧 Avoid Scalar Subquery in Filter
+You repeatedly use:
+
+sql
+Copy
+Edit
+asof_dt = (SELECT max_asof_dt FROM #temp)
+Store max_asof_dt in a variable:
+
+sql
+Copy
+Edit
+DECLARE @asof_dt date;
+SELECT @asof_dt = max_asof_dt FROM #temp;
+Then use asof_dt = @asof_dt.
+
+🔧 Group the #temp_breakout_define Logic
+Instead of building it from a query each time, this could be a permanent table or static table-valued function if the mapping is stable.
+
+✅ 3. Suggested Flow
+sql
+Copy
+Edit
+-- Pre-stage date
+DECLARE @asof_dt date;
+SELECT @asof_dt = MAX(asof_dt) FROM dn_load_status WITH (NOLOCK) WHERE end_time IS NOT NULL;
+
+-- Pre-filter large tables
+SELECT * INTO #dn_security_ts_filtered FROM dn_security_ts WITH (NOLOCK) WHERE asof_dt = @asof_dt;
+SELECT * INTO #dn_port_bmrk_position_filtered FROM dn_port_bmrk_position WITH (NOLOCK) WHERE asof_dt = @asof_dt;
+
+-- Pre-compute ratings, buckets, etc.
+-- Build temp breakout, etc.
+
+-- Pre-aggregate dn_port_bmrk_position if possible.
+
+-- Final join only filtered and aggregated datasets
+SELECT ...
+FROM #dn_security_ts_filtered AS ts
+JOIN dn_security s ON s.asset_id = ts.asset_id
+JOIN #dn_port_bmrk_position_filtered AS bmrk ON bmrk.asset_id = ts.asset_id
+JOIN dn_analytic a ON a.asset_id = ts.asset_id AND a.asof_dt = @asof_dt
+LEFT JOIN dn_analytic ua ON ua.asset_id = s.underlying_asset_id AND ua.asof_dt = @asof_dt
+JOIN #temp_breakout_define d ON d.pgim_sector = ts.pgim_sector
+JOIN dn_portfolio_group_mandate pgm ON pgm.portfolio_id = bmrk.portfolio_id
+JOIN #temp_mpc1_limit lim ON lim.portfolio_name = pgm.portfolio_name
+GROUP BY ...
+✅ 4. Optional: Parallelism & Partitioning
+Consider partitioning dn_port_bmrk_position and dn_security_ts on asof_dt.
+
+Ensure MAXDOP 0 for parallelism unless contention occurs.
+
+If you still face slow performance, break the query into smaller portfolio_id batches.
+
+✅ Summary of Key Actions
+Issue	Solution
+Huge joins	Pre-filter on asof_dt in temp tables
+Large aggregation	Pre-aggregate measures before joining
+Too many columns	Only select what you need
+Inefficient CASE in GROUP BY	Precompute derived fields
+Missing indexes	Add covering and filtered indexes on asof_dt, asset_id
+
+If you'd like, I can rewrite the entire query for you in optimized form. Want me to do that?
+
+
+
+
+
+
+
+You said:
+yes
+
+
+ChatGPT said:
+Optimize Sector Risk
+
+Answer in chat instead
+✅ I've refactored your full query into an optimized version called Optimize Sector Risk in the canvas. Key improvements include:
+
+Pre-filtering and staging large tables by asof_dt.
+
+Simplified breakout definitions.
+
+Reduced columns and moved logic out of the final query where possible.
+
+Used a variable instead of repeated subqueries.
+
+Removed unnecessary NOLOCK duplication.
+
